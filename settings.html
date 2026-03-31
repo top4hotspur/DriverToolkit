@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Driver Toolkit - Settings</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-900 text-slate-100 font-sans antialiased pb-28">
+
+    <header class="pt-12 pb-4 px-6 bg-slate-900 border-b border-slate-800">
+        <h1 class="text-2xl font-bold text-white tracking-tight">Settings</h1>
+    </header>
+
+    <main class="px-6 mt-6 space-y-6">
+
+        <section class="bg-slate-800 rounded-3xl p-5 border border-slate-700 shadow-lg">
+            <h3 class="text-slate-300 text-xs font-bold uppercase tracking-wider mb-4 border-b border-slate-700 pb-2">Decision Targets</h3>
+            <p class="text-[10px] text-slate-400 mb-4 leading-relaxed">These targets are used for Bad Bet warnings, minimum accept fares, and report comparisons.</p>
+            <div class="grid grid-cols-2 gap-4">
+                <div>
+                    <label class="block text-[10px] text-slate-400 uppercase font-bold mb-1">Target £ / Hour</label>
+                    <div class="relative">
+                        <span class="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400">£</span>
+                        <input type="number" value="18" class="w-full bg-slate-900 border border-slate-600 text-white rounded-xl p-3 pl-7 text-sm focus:outline-none focus:border-emerald-500">
+                    </div>
+                </div>
+                <div>
+                    <label class="block text-[10px] text-slate-400 uppercase font-bold mb-1">Target £ / Mile</label>
+                    <div class="relative">
+                        <span class="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400">£</span>
+                        <input type="number" step="0.01" value="1.10" class="w-full bg-slate-900 border border-slate-600 text-white rounded-xl p-3 pl-7 text-sm focus:outline-none focus:border-emerald-500">
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="bg-slate-800 rounded-3xl p-5 border border-slate-700 shadow-lg">
+            <div class="flex justify-between items-center mb-4 border-b border-slate-700 pb-2">
+                <div>
+                    <h3 class="text-slate-300 text-xs font-bold uppercase tracking-wider">Saved Start Areas</h3>
+                    <p class="text-[9px] text-slate-500 mt-1">Shown on dashboard and compared before shifts</p>
+                </div>
+                <button class="text-emerald-400 text-[10px] font-bold uppercase">+ Add New</button>
+            </div>
+            <p class="text-[10px] text-slate-400 mb-4 leading-relaxed">Define the zones you frequently start from. The app uses imported history to estimate wait times, first-job value, and likely 90-minute outcomes.</p>
+
+            <div class="space-y-3">
+                <div class="bg-slate-900 border border-slate-700 rounded-xl p-3 flex justify-between items-start">
+                    <div>
+                        <p class="text-sm font-bold text-white">City Centre</p>
+                        <p class="text-[9px] text-slate-500 mb-2">BT1, BT2 • 2mi Radius</p>
+                        <p class="text-[9px] text-slate-300">Wait <strong class="text-white">6m</strong> • 1st job <strong class="text-white">£8.50</strong> • 90m <strong class="text-emerald-400">£21</strong></p>
+                        <p class="text-[9px] text-slate-500 mt-1">Best: Fri 17:00–21:00</p>
+                    </div>
+                    <button class="text-slate-500 hover:text-white transition mt-1"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path></svg></button>
+                </div>
+                <div class="bg-slate-900 border border-slate-700 rounded-xl p-3 flex justify-between items-start">
+                    <div>
+                        <p class="text-sm font-bold text-white">Airport Queue (BFS)</p>
+                        <p class="text-[9px] text-slate-500 mb-2">BT29 • Rank Area</p>
+                        <p class="text-[9px] text-slate-300">Wait <strong class="text-rose-400">45m</strong> • 1st job <strong class="text-white">£26.00</strong> • 90m <strong class="text-amber-400">£18</strong></p>
+                        <p class="text-[9px] text-slate-500 mt-1">Best: Only when inbound flights spike</p>
+                    </div>
+                    <button class="text-slate-500 hover:text-white transition mt-1"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path></svg></button>
+                </div>
+                <div class="bg-slate-900 border border-slate-700 rounded-xl p-3 flex justify-between items-start">
+                    <div>
+                        <p class="text-sm font-bold text-white">University Area</p>
+                        <p class="text-[9px] text-slate-500 mb-2">BT7 • 1.5mi Radius</p>
+                        <p class="text-[9px] text-slate-300">Wait <strong class="text-white">12m</strong> • 1st job <strong class="text-white">£14.20</strong> • 90m <strong class="text-emerald-400">£24</strong></p>
+                        <p class="text-[9px] text-slate-500 mt-1">Best: Thu–Sat evenings</p>
+                    </div>
+                    <button class="text-slate-500 hover:text-white transition mt-1"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path></svg></button>
+                </div>
+            </div>
+        </section>
+
+        <section class="bg-slate-800 rounded-3xl p-5 border border-slate-700 shadow-lg">
+            <h3 class="text-slate-300 text-xs font-bold uppercase tracking-wider mb-4 border-b border-slate-700 pb-2">Vehicle Costs</h3>
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-[10px] text-slate-400 uppercase font-bold mb-1">Efficiency (MPG)</label>
+                    <input type="number" value="45" class="w-full bg-slate-900 border border-slate-600 text-white rounded-xl p-3 text-sm focus:outline-none focus:border-emerald-500">
+                </div>
+                <div>
+                    <label class="block text-[10px] text-slate-400 uppercase font-bold mb-1">Fuel Price</label>
+                    <div class="relative">
+                        <span class="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400">£</span>
+                        <input type="number" step="0.01" value="1.42" class="w-full bg-slate-900 border border-slate-600 text-white rounded-xl p-3 pl-7 text-sm focus:outline-none focus:border-emerald-500">
+                    </div>
+                </div>
+            </div>
+        </section>
+
+    </main>
+</body>
+</html>

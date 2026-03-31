@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Driver Toolkit - Authentication</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-900 text-slate-100 font-sans antialiased h-screen flex flex-col justify-center items-center px-6 relative overflow-hidden">
+
+    <div class="absolute top-[-10%] left-[-10%] w-64 h-64 bg-emerald-500/20 rounded-full blur-[80px]"></div>
+    <div class="absolute bottom-[-10%] right-[-10%] w-64 h-64 bg-sky-500/20 rounded-full blur-[80px]"></div>
+
+    <div class="mb-8 text-center z-10">
+        <div class="w-16 h-16 bg-slate-800 rounded-2xl border border-slate-700 mx-auto flex items-center justify-center mb-4 shadow-lg">
+            <svg class="w-8 h-8 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+        </div>
+        <h1 class="text-3xl font-black text-white tracking-tight">Driver Toolkit</h1>
+        <p class="text-slate-400 text-sm mt-2">The Ultimate BI Tool for Gig Workers</p>
+    </div>
+
+    <div class="w-full max-w-sm bg-slate-800/80 backdrop-blur-md rounded-3xl p-6 border border-slate-700 shadow-2xl z-10">
+        
+        <div class="flex bg-slate-900 rounded-xl p-1 mb-6 border border-slate-800">
+            <button class="flex-1 py-2 text-xs font-bold text-white bg-slate-800 rounded-lg shadow-sm">Sign Up</button>
+            <button class="flex-1 py-2 text-xs font-bold text-slate-500 hover:text-white transition">Sign In</button>
+        </div>
+
+        <div class="bg-emerald-900/20 border border-emerald-500/30 rounded-xl p-3 mb-6">
+            <h3 class="text-emerald-400 text-[10px] font-black uppercase tracking-wider flex items-center mb-2">
+                <svg class="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                30-Day Premium Trial Included
+            </h3>
+            <ul class="text-[10px] text-slate-300 space-y-1 ml-4 list-disc">
+                <li>Live Proximity Radar & Hotspot Alerts</li>
+                <li>Predictive Smart Diary (Flights & Events)</li>
+                <li>Automated Missing Fee Audits</li>
+            </ul>
+        </div>
+
+        <div class="space-y-4">
+            <div>
+                <label class="block text-[10px] text-slate-400 uppercase font-bold mb-1 ml-1">Email Address</label>
+                <input type="email" placeholder="driver@example.com" class="w-full bg-slate-900 border border-slate-600 text-white rounded-xl p-3 text-sm focus:outline-none focus:border-emerald-500 transition">
+            </div>
+            <div>
+                <label class="block text-[10px] text-slate-400 uppercase font-bold mb-1 ml-1">Password</label>
+                <input type="password" placeholder="••••••••" class="w-full bg-slate-900 border border-slate-600 text-white rounded-xl p-3 text-sm focus:outline-none focus:border-emerald-500 transition">
+            </div>
+        </div>
+
+        <button class="w-full bg-emerald-500 hover:bg-emerald-400 text-white font-bold py-3.5 rounded-xl shadow-lg shadow-emerald-500/20 transition mt-6 text-sm">
+            Create Account
+        </button>
+
+        <p class="text-[9px] text-slate-500 text-center mt-4">By signing up, you agree to our Terms & Data Pooling Privacy Policy.</p>
+    </div>
+
+    <div class="absolute bottom-4 w-full max-w-sm px-6">
+        <div class="bg-slate-900 border border-dashed border-sky-500/50 rounded-2xl p-3">
+            <h4 class="text-sky-400 text-[9px] font-mono font-bold uppercase mb-1">🤖 Codex Task: Auth Flow</h4>
+            <ul class="text-slate-400 text-[8px] font-mono list-disc pl-4 space-y-0.5">
+                <li>Connect form to Firebase/Supabase Auth.</li>
+                <li>On successful creation, route immediately to `index.html` (Dashboard).</li>
+            </ul>
+        </div>
+    </div>
+
+</body>
+</html>

@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Driver Toolkit - Sync Data</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-900 text-slate-100 font-sans antialiased pb-28 leading-tight">
+
+    <header class="pt-10 pb-3 bg-slate-900 border-b border-slate-800 px-5">
+        <h1 class="text-xl font-bold text-white tracking-tight">Sync Platform Data</h1>
+        <p class="text-[10px] text-slate-400 mt-0.5">Refresh the app's memory from your driving history</p>
+    </header>
+
+    <main class="px-5 mt-4 space-y-4">
+
+        <div class="bg-emerald-900/20 border border-emerald-500/30 rounded-2xl p-4 shadow-md">
+            <h3 class="text-emerald-400 text-[11px] font-black uppercase tracking-wider mb-2">Why we need this upload</h3>
+            <p class="text-[10px] text-slate-300 leading-relaxed mb-3">
+                Uploading your platform history is what gives Driver Toolkit its memory. It powers wait-time estimates, start-area comparisons, low-value area warnings, journey-regret analysis, and earnings leak detection.
+            </p>
+            <p class="text-[10px] text-slate-400 leading-relaxed">
+                Without this file, the app can still handle expenses, targets, and settings, but your recommendations will be limited.
+            </p>
+        </div>
+
+        <div class="bg-slate-800 rounded-2xl p-4 border border-slate-700 shadow-md">
+            <h3 class="text-slate-300 text-[11px] font-bold uppercase tracking-wider mb-3 border-b border-slate-700 pb-1.5">How to get your Uber data</h3>
+            <ol class="space-y-3 relative border-l border-slate-700 ml-2">
+                <li class="pl-4 relative">
+                    <div class="absolute -left-2 top-0 w-4 h-4 bg-slate-900 border border-slate-600 rounded-full flex items-center justify-center text-[8px] font-bold text-slate-300">1</div>
+                    <p class="text-[11px] font-bold text-white mb-0.5">Go to Uber Privacy Portal</p>
+                    <p class="text-[9px] text-slate-400">Navigate to myprivacy.uber.com. On mobile, switch your browser to Desktop Site first.</p>
+                </li>
+                <li class="pl-4 relative">
+                    <div class="absolute -left-2 top-0 w-4 h-4 bg-slate-900 border border-slate-600 rounded-full flex items-center justify-center text-[8px] font-bold text-slate-300">2</div>
+                    <p class="text-[11px] font-bold text-white mb-0.5">Request your data</p>
+                    <p class="text-[9px] text-slate-400">Select Driver data and wait for the email. Uber can take 24–72 hours.</p>
+                </li>
+                <li class="pl-4 relative">
+                    <div class="absolute -left-2 top-0 w-4 h-4 bg-slate-900 border border-slate-600 rounded-full flex items-center justify-center text-[8px] font-bold text-slate-300">3</div>
+                    <p class="text-[11px] font-bold text-white mb-0.5">Download the ZIP</p>
+                    <p class="text-[9px] text-slate-400">Save the raw ZIP file directly to your phone files. No need to unzip it first.</p>
+                </li>
+                <li class="pl-4 relative">
+                    <div class="absolute -left-2 top-0 w-4 h-4 bg-slate-900 border border-slate-600 rounded-full flex items-center justify-center text-[8px] font-bold text-slate-300">4</div>
+                    <p class="text-[11px] font-bold text-white mb-0.5">Upload here</p>
+                    <p class="text-[9px] text-slate-400">Upload the raw file below to refresh your insights, bad bets, and reports.</p>
+                </li>
+            </ol>
+            <button class="mt-5 w-full border border-dashed border-indigo-500/50 bg-indigo-500/10 text-indigo-300 text-[10px] font-bold py-3 rounded-xl hover:bg-indigo-500/20 transition">
+                UPLOAD .ZIP FILE
+            </button>
+            <p class="text-[9px] text-slate-500 text-center mt-2">Currently supports Uber Privacy ZIP. Bolt and Lyft are planned next.</p>
+        </div>
+
+    </main>
+</body>
+</html>
