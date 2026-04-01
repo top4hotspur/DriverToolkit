@@ -28,6 +28,7 @@ import { SessionStateModel } from "../state/sessionTypes";
 import { listStartPoints } from "../state/startPoints";
 import { StartPoint } from "../state/startPointTypes";
 import { shouldShowDueWarning, daysUntil } from "../utils/dueDates";
+import { deriveUkOutwardCode } from "../utils/postcodes";
 import {
   evidenceDetailFromSample,
   evidenceLabelFromConfidence,
@@ -220,16 +221,16 @@ export function DashboardScreen() {
           state: "unavailable",
           decision: null,
           userFacingDecisionLabel: "Reminder",
-          headline: "Add preferred starting points",
-          rationale: "Don't forget to set your preferred starting points - you can always change these later.",
+          headline: "Add favourites",
+          rationale: "Don't forget to set your favourites - you can always change these later.",
           evidenceLabel: "No evidence",
           evidenceDetail: "No saved start points available for comparison yet.",
           basisWindowDays: 90,
-          fallbackMessage: "Add at least one preferred starting point in Settings first.",
+          fallbackMessage: "Add at least one favourite in Settings first.",
         });
       }
 
-      const chosenArea = startPoints[0]?.postcode ?? session.currentAreaLabel ?? null;
+      const chosenArea = startPoints[0]?.outwardCode ?? startPoints[0]?.postcode ?? session.currentAreaLabel ?? null;
       try {
         const next = await setSessionMode("online", chosenArea);
         setSession(next);
@@ -342,6 +343,7 @@ export function DashboardScreen() {
           <Text style={styles.statusText}>{session.mode === "online" ? `Online - ${session.currentAreaLabel ?? "Locating area"}` : "Offline"}</Text>
         </Pressable>
         <Text style={styles.statusHint}>{session.mode === "online" ? "Tap to go offline" : "Tap to go online"}</Text>
+        {session.mode === "offline" ? <Text style={styles.statusHint}>Mileage tracking inactive in offline mode</Text> : null}
         {actionMessage ? <Text style={styles.statusMessage}>{actionMessage}</Text> : null}
       </Card>
 
@@ -394,7 +396,7 @@ export function DashboardScreen() {
       ) : (
         <>
           <Card title="Should I Go Online Now?">
-            <Text>Tap to compare nearby preferred start points using historical performance at this time.</Text>
+            <Text>Tap to compare nearby favourites using historical performance at this time.</Text>
             <PrimaryButton label="Should I go online now?" onPress={onShouldGoOnlineNow} />
             {goOnlineDecision ? (
               <View style={{ marginTop: 8, gap: 4 }}>
@@ -435,7 +437,6 @@ export function DashboardScreen() {
             {getCaughtUpState(outstandingActions) ? (
               <View style={{ gap: 8 }}>
                 <Text>You're all caught up!</Text>
-                <PrimaryButton label="Upload privacy file" onPress={() => router.push("/upload")} />
               </View>
             ) : null}
           </Card>
@@ -477,7 +478,7 @@ async function deriveAreaLabel(latitude: number, longitude: number): Promise<str
       return null;
     }
 
-    const outward = first.postalCode?.trim().split(" ")[0]?.toUpperCase();
+    const outward = deriveUkOutwardCode(first.postalCode ?? "");
     if (outward) {
       return outward;
     }

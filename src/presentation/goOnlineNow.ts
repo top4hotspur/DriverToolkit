@@ -1,6 +1,7 @@
-﻿import * as Location from "expo-location";
+import * as Location from "expo-location";
 import { GoOnlineNowDecisionContract } from "../contracts/goOnlineNow";
 import { StartPoint } from "../state/startPointTypes";
+import { deriveUkOutwardCode } from "../utils/postcodes";
 
 export async function evaluateShouldGoOnlineNow(args: {
   maxRadiusMiles: number | null;
@@ -11,7 +12,7 @@ export async function evaluateShouldGoOnlineNow(args: {
   }
 
   if (args.startPoints.length === 0) {
-    return unavailable("Add at least one preferred starting point in Settings first.");
+    return unavailable("Add at least one favourite in Settings first.");
   }
 
   const maxRadiusMiles = args.maxRadiusMiles;
@@ -44,7 +45,7 @@ export async function evaluateShouldGoOnlineNow(args: {
         userFacingDecisionLabel: "Don't work now",
         headline: "Don't work now",
         rationale:
-          "No preferred starting point inside your configured radius is historically strong enough for this time window.",
+          "No favourite start point inside your configured radius is historically strong enough for this time window.",
         evidenceLabel: "Good evidence",
         evidenceDetail: "Based on comparable start periods in your recent history.",
         percentileBand: "bottom 25%",
@@ -53,7 +54,8 @@ export async function evaluateShouldGoOnlineNow(args: {
     }
 
     const best = nearby[0];
-    const areaStrength = scoreAreaForCurrentTime(best.point.postcode);
+    const bestOutward = best.point.outwardCode ?? deriveUkOutwardCode(best.point.postcode) ?? best.point.postcode;
+    const areaStrength = scoreAreaForCurrentTime(bestOutward);
 
     if (areaStrength >= 0.75) {
       return {
@@ -61,7 +63,7 @@ export async function evaluateShouldGoOnlineNow(args: {
         decision: "DO_WORK",
         userFacingDecisionLabel: "Go online here",
         headline: "Go online here",
-        rationale: `${best.point.postcode} is historically one of your stronger starts for this day and time.`,
+        rationale: `${bestOutward} is historically one of your stronger starts for this day and time.`,
         evidenceLabel: "Strong evidence",
         evidenceDetail: "Based on similar start windows in the last 90 days.",
         percentileBand: "top 20%",
@@ -71,15 +73,17 @@ export async function evaluateShouldGoOnlineNow(args: {
 
     if (nearby.length > 1) {
       const alternative = nearby[1];
+      const alternativeOutward =
+        alternative.point.outwardCode ?? deriveUkOutwardCode(alternative.point.postcode) ?? alternative.point.postcode;
       return {
         state: "decision",
         decision: "DO_WORK_GO_TO_AREA",
         userFacingDecisionLabel: "Go online, but reposition first",
         headline: "Go online, but reposition first",
-        rationale: `${best.point.postcode} is weaker now, but ${alternative.point.postcode} is historically stronger for this time.`,
+        rationale: `${bestOutward} is weaker now, but ${alternativeOutward} is historically stronger for this time.`,
         evidenceLabel: "Good evidence",
         evidenceDetail: "Based on comparable starts and nearby area ranking.",
-        comparedAreaLabel: alternative.point.postcode,
+        comparedAreaLabel: alternativeOutward,
         comparedAreaDistanceMiles: round2(alternative.distanceMiles),
         percentileBand: "top 75%",
         basisWindowDays: 90,
@@ -116,9 +120,9 @@ function unavailable(message: string): GoOnlineNowDecisionContract {
   };
 }
 
-function scoreAreaForCurrentTime(postcode: string): number {
+function scoreAreaForCurrentTime(outwardCode: string): number {
   const hour = new Date().getHours();
-  const base = postcode.startsWith("BT7") ? 0.82 : postcode.startsWith("BT1") ? 0.68 : 0.55;
+  const base = outwardCode.startsWith("BT7") ? 0.82 : outwardCode.startsWith("BT1") ? 0.68 : 0.55;
 
   if (hour >= 17 && hour <= 21) {
     return Math.min(base + 0.1, 0.95);

@@ -1,7 +1,8 @@
-﻿import { StartPoint } from "./startPointTypes";
+import { deriveUkOutwardCode, normalizeUkPostcode } from "../utils/postcodes";
+import { StartPoint } from "./startPointTypes";
 
 let points: StartPoint[] = [
-  { id: "sp-default", label: "City Start", postcode: "BT1", latitude: 54.6, longitude: -5.93 },
+  { id: "sp-default", label: "City Start", postcode: "BT1 1AA", outwardCode: "BT1", latitude: 54.6, longitude: -5.93 },
 ];
 
 export async function listStartPoints(): Promise<StartPoint[]> {
@@ -9,11 +10,13 @@ export async function listStartPoints(): Promise<StartPoint[]> {
 }
 
 export async function addStartPoint(input: { postcode: string; label: string }): Promise<void> {
+  const postcode = normalizeUkPostcode(input.postcode);
   points = [
     {
       id: `sp-${Date.now()}`,
-      label: input.label || input.postcode,
-      postcode: input.postcode.toUpperCase(),
+      label: input.label || postcode,
+      postcode,
+      outwardCode: deriveUkOutwardCode(postcode),
       latitude: 54.6,
       longitude: -5.93,
     },
@@ -22,12 +25,14 @@ export async function addStartPoint(input: { postcode: string; label: string }):
 }
 
 export async function updateStartPoint(id: string, input: { postcode: string; label: string }): Promise<void> {
+  const postcode = normalizeUkPostcode(input.postcode);
   points = points.map((point) =>
     point.id === id
       ? {
           ...point,
-          label: input.label || input.postcode,
-          postcode: input.postcode.toUpperCase(),
+          label: input.label || postcode,
+          postcode,
+          outwardCode: deriveUkOutwardCode(postcode),
         }
       : point,
   );

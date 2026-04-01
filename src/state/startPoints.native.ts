@@ -1,4 +1,5 @@
-﻿import { getDb } from "../db/client.native";
+import { getDb } from "../db/client.native";
+import { deriveUkOutwardCode, normalizeUkPostcode } from "../utils/postcodes";
 import { StartPoint } from "./startPointTypes";
 
 const USER_ID = "local-user";
@@ -23,13 +24,17 @@ export async function listStartPoints(): Promise<StartPoint[]> {
     ORDER BY created_at DESC
   `, [USER_ID]);
 
-  return rows;
+  return rows.map((row) => ({
+    ...row,
+    outwardCode: deriveUkOutwardCode(row.postcode),
+  }));
 }
 
 export async function addStartPoint(input: { postcode: string; label: string }): Promise<void> {
   const db = await getDb();
-  const postcode = normalizePostcode(input.postcode);
-  const coords = approximatePostcodeCoords(postcode);
+  const postcode = normalizeUkPostcode(input.postcode);
+  const outwardCode = deriveUkOutwardCode(postcode);
+  const coords = approximatePostcodeCoords(outwardCode ?? postcode);
   const id = `sp_${Date.now()}_${Math.floor(Math.random() * 100000)}`;
 
   await db.runAsync(
@@ -44,8 +49,9 @@ export async function addStartPoint(input: { postcode: string; label: string }):
 
 export async function updateStartPoint(id: string, input: { postcode: string; label: string }): Promise<void> {
   const db = await getDb();
-  const postcode = normalizePostcode(input.postcode);
-  const coords = approximatePostcodeCoords(postcode);
+  const postcode = normalizeUkPostcode(input.postcode);
+  const outwardCode = deriveUkOutwardCode(postcode);
+  const coords = approximatePostcodeCoords(outwardCode ?? postcode);
 
   await db.runAsync(
     `
@@ -62,12 +68,8 @@ export async function removeStartPoint(id: string): Promise<void> {
   await db.runAsync(`DELETE FROM start_areas WHERE id = ?`, [id]);
 }
 
-function normalizePostcode(postcode: string): string {
-  return postcode.trim().toUpperCase().replace(/\s+/g, "");
-}
-
-function approximatePostcodeCoords(postcode: string): { lat: number; lng: number } {
-  const core = postcode.startsWith("BT") ? postcode : `BT1`;
+function approximatePostcodeCoords(postcodeOrOutward: string): { lat: number; lng: number } {
+  const core = postcodeOrOutward.startsWith("BT") ? postcodeOrOutward : `BT1`;
   const district = Number(core.replace(/[^0-9]/g, "").slice(0, 2)) || 1;
 
   return {

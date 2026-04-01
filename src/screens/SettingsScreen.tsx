@@ -7,7 +7,6 @@ import { addStartPoint, listStartPoints, removeStartPoint, updateStartPoint } fr
 import { StartPoint } from "../state/startPointTypes";
 import { getTargetSettings, saveTargetSettings } from "../state/targetsState";
 import { getVehicleCostSettings, saveVehicleCostSettings } from "../state/vehicleCostState";
-import { daysUntil, shouldShowDueWarning } from "../utils/dueDates";
 import { formatGBP } from "../utils/format";
 import { Card, KeyValueRow, PrimaryButton, ScreenShell } from "./ui";
 
@@ -19,6 +18,7 @@ export function SettingsScreen() {
   const [fuelInput, setFuelInput] = useState(`${placeholderSettings.vehicleAssumptions.fuelPricePerLitre}`);
   const [maintenanceInput, setMaintenanceInput] = useState(`${placeholderSettings.vehicleAssumptions.maintenancePerMile}`);
   const [taxSavingsInput, setTaxSavingsInput] = useState(`${placeholderSettings.taxSavingsAmount}`);
+  const [radiusInput, setRadiusInput] = useState(`${placeholderSettings.maxStartShiftTravelRadiusMiles}`);
   const [startPoints, setStartPoints] = useState<StartPoint[]>([]);
   const [newPostcode, setNewPostcode] = useState("");
   const [newLabel, setNewLabel] = useState("");
@@ -35,6 +35,7 @@ export function SettingsScreen() {
         setFuelInput(`${vehicle.fuelPricePerLitre}`);
         setMaintenanceInput(`${vehicle.maintenancePerMile}`);
         setTaxSavingsInput(`${nextSettings.taxSavingsAmount}`);
+        setRadiusInput(`${nextSettings.maxStartShiftTravelRadiusMiles}`);
       })
       .catch(() => {
         setSettings(null);
@@ -58,7 +59,7 @@ export function SettingsScreen() {
 
   const addPoint = async () => {
     if (!newPostcode.trim()) {
-      setSaveMessage("Enter a postcode before adding a start point.");
+      setSaveMessage("Enter a postcode before adding a favourite.");
       return;
     }
 
@@ -67,9 +68,9 @@ export function SettingsScreen() {
       setStartPoints(await listStartPoints());
       setNewPostcode("");
       setNewLabel("");
-      setSaveMessage("Start point saved.");
+      setSaveMessage("Favourite saved.");
     } catch {
-      setSaveMessage("Couldn't save start point right now. Try again.");
+      setSaveMessage("Couldn't save favourite right now. Try again.");
     }
   };
 
@@ -77,9 +78,9 @@ export function SettingsScreen() {
     try {
       await removeStartPoint(id);
       setStartPoints(await listStartPoints());
-      setSaveMessage("Start point removed.");
+      setSaveMessage("Favourite removed.");
     } catch {
-      setSaveMessage("Couldn't remove that start point. Try again.");
+      setSaveMessage("Couldn't remove that favourite. Try again.");
     }
   };
 
@@ -90,9 +91,9 @@ export function SettingsScreen() {
         label: `${point.label} (Updated)`,
       });
       setStartPoints(await listStartPoints());
-      setSaveMessage("Start point label updated.");
+      setSaveMessage("Favourite label updated.");
     } catch {
-      setSaveMessage("Couldn't update start point label. Try again.");
+      setSaveMessage("Couldn't update favourite label. Try again.");
     }
   };
 
@@ -103,6 +104,7 @@ export function SettingsScreen() {
     const parsedFuel = Number(fuelInput);
     const parsedMaintenance = Number(maintenanceInput);
     const parsedTaxSavings = Number(taxSavingsInput);
+    const parsedRadius = Number(radiusInput);
 
     if (
       !Number.isFinite(parsedHourly) ||
@@ -110,7 +112,8 @@ export function SettingsScreen() {
       !Number.isFinite(parsedMpg) ||
       !Number.isFinite(parsedFuel) ||
       !Number.isFinite(parsedMaintenance) ||
-      !Number.isFinite(parsedTaxSavings)
+      !Number.isFinite(parsedTaxSavings) ||
+      !Number.isFinite(parsedRadius)
     ) {
       setSaveMessage("Check values and use valid numbers before saving.");
       return;
@@ -130,6 +133,7 @@ export function SettingsScreen() {
         saveAppSettings({
           ...effective,
           taxSavingsAmount: parsedTaxSavings,
+          maxStartShiftTravelRadiusMiles: parsedRadius,
         }),
       ]);
 
@@ -146,6 +150,7 @@ export function SettingsScreen() {
       setFuelInput(`${vehicle.fuelPricePerLitre}`);
       setMaintenanceInput(`${vehicle.maintenancePerMile}`);
       setTaxSavingsInput(`${nextSettings.taxSavingsAmount}`);
+      setRadiusInput(`${nextSettings.maxStartShiftTravelRadiusMiles}`);
       setSaveMessage("Settings saved.");
     } catch {
       setSaveMessage("Couldn't save settings right now. Try again.");
@@ -153,7 +158,7 @@ export function SettingsScreen() {
   };
 
   return (
-    <ScreenShell title="Settings" subtitle="Decision controls, compliance dates, and preferred postcode starting points.">
+    <ScreenShell title="Settings" subtitle="Decision controls, Favourites, and compliance details.">
       <Card title="Targets (Editable)">
         <Text>Target £/hour</Text>
         <TextInput value={targetHourlyInput} onChangeText={setTargetHourlyInput} style={styles.input} keyboardType="decimal-pad" />
@@ -172,53 +177,42 @@ export function SettingsScreen() {
         <Text>Fuel stays user-editable now and can later be refreshed from fuel receipts.</Text>
       </Card>
 
-      <Card title="Tax + Compliance Controls">
+      <Card title="Start Preferences">
+        <Text>Max start-shift travel radius (miles)</Text>
+        <TextInput value={radiusInput} onChangeText={setRadiusInput} style={styles.input} keyboardType="decimal-pad" />
+        <Text>Used when checking whether a nearby area would be a better place to begin working.</Text>
+      </Card>
+
+      <Card title="Tax">
         <Text>Tax savings amount</Text>
         <TextInput value={taxSavingsInput} onChangeText={setTaxSavingsInput} style={styles.input} keyboardType="decimal-pad" />
         <PrimaryButton label="Save controls" onPress={saveControls} />
         {saveMessage ? <Text>{saveMessage}</Text> : null}
-
         <KeyValueRow label="Saved tax amount" value={formatGBP(effective.taxSavingsAmount)} />
         <KeyValueRow label="Estimated tax liability" value={formatGBP(effective.estimatedTaxLiability)} />
         <KeyValueRow label="Tax correct to" value={effective.taxCorrectToDate ?? "Not set"} />
+      </Card>
+
+      <Card title="Compliance">
         <KeyValueRow label="PSV due date" value={effective.psvDueDate ?? "Not set"} />
         <KeyValueRow label="Insurance due date" value={effective.insuranceDueDate ?? "Not set"} />
         <KeyValueRow label="Operator licence expiry" value={effective.operatorLicenceDueDate ?? "Not set"} />
         <KeyValueRow label="Training hours completed" value={effective.trainingHoursCompleted.toFixed(2)} />
-        <KeyValueRow
-          label="Max start-shift travel radius"
-          value={`${effective.maxStartShiftTravelRadiusMiles.toFixed(1)} miles`}
-        />
-        <Text>
-          How far are you prepared to travel to start your shift? Used when checking whether a nearby area would be a better place to begin working.
-        </Text>
       </Card>
 
-      <Card title="Upcoming Warnings Preview">
-        {effective.psvDueDate && shouldShowDueWarning(effective.psvDueDate, 42) ? (
-          <Text>{`PSV due in ${daysUntil(effective.psvDueDate)} days`}</Text>
-        ) : (
-          <Text>PSV warning not active.</Text>
-        )}
-        {effective.insuranceDueDate && shouldShowDueWarning(effective.insuranceDueDate, 42) ? (
-          <Text>{`Insurance renewal due in ${daysUntil(effective.insuranceDueDate)} days`}</Text>
-        ) : (
-          <Text>Insurance warning not active.</Text>
-        )}
-      </Card>
-
-      <Card title="Preferred Starting Points (Postcode)">
-        <Text>Set the postcodes you are prepared to start from. These power start recommendations.</Text>
-        <TextInput value={newPostcode} onChangeText={setNewPostcode} style={styles.input} placeholder="Postcode (e.g. BT7)" />
+      <Card title="Favourites">
+        <Text>Set the postcodes you prefer to work from or return to between jobs.</Text>
+        <Text>These are used when comparing nearby areas and start-of-shift suggestions.</Text>
+        <TextInput value={newPostcode} onChangeText={setNewPostcode} style={styles.input} placeholder="Postcode (e.g. BT6 9LF)" />
         <TextInput value={newLabel} onChangeText={setNewLabel} style={styles.input} placeholder="Optional label" />
-        <PrimaryButton label="Add start point" onPress={addPoint} />
+        <PrimaryButton label="Add favourite" onPress={addPoint} />
 
         {startPoints.length === 0 ? (
-          <Text>Don't forget to set your preferred starting points - you can always change these later.</Text>
+          <Text>Add at least one favourite to power start-of-shift comparison.</Text>
         ) : (
           startPoints.map((point) => (
             <View key={point.id} style={styles.pointRow}>
-              <Text>{`${point.postcode} - ${point.label}`}</Text>
+              <Text>{`${point.postcode} (${point.outwardCode ?? "N/A"}) - ${point.label}`}</Text>
               <View style={styles.rowButtons}>
                 <PrimaryButton label="Edit label" onPress={() => renamePoint(point)} />
                 <PrimaryButton label="Remove" onPress={() => removePoint(point.id)} />
