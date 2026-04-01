@@ -68,33 +68,55 @@ export async function setSessionMode(mode: SessionMode, areaLabel: string | null
   const db = await getDb();
   await ensureSessionRow();
   await ensureSessionColumns();
+  await ensureSessionHistoryTable();
 
   const previous = await getSessionState();
   const now = new Date();
   const nowIso = now.toISOString();
   const enabled = mode === "online" ? 1 : 0;
 
-  let accumulatedOnlineSeconds = previous.accumulatedOnlineSeconds;
+  let completedSessionSeconds = 0;
   if (mode === "offline" && previous.mode === "online" && previous.trackingStartedAt) {
     const started = new Date(previous.trackingStartedAt).getTime();
-    const deltaSeconds = Math.max(0, Math.floor((now.getTime() - started) / 1000));
-    accumulatedOnlineSeconds += deltaSeconds;
+    completedSessionSeconds = Math.max(0, Math.floor((now.getTime() - started) / 1000));
   }
+
+  const nextTrackingStartedAt = mode === "online" ? nowIso : null;
+  const nextTrackingStoppedAt = mode === "offline" ? nowIso : previous.trackingStoppedAt;
 
   await db.runAsync(
     `
       UPDATE session_state
       SET mode = ?,
           current_area_label = ?,
-          tracking_started_at = CASE WHEN ? = 'online' THEN ? ELSE tracking_started_at END,
-          tracking_stopped_at = CASE WHEN ? = 'offline' THEN ? ELSE tracking_stopped_at END,
+          tracking_started_at = ?,
+          tracking_stopped_at = ?,
           business_mileage_tracking_enabled = ?,
           accumulated_online_seconds = ?,
           updated_at = ?
       WHERE id = ?
     `,
-    [mode, areaLabel, mode, nowIso, mode, nowIso, enabled, accumulatedOnlineSeconds, nowIso, SESSION_ID],
+    [mode, areaLabel, nextTrackingStartedAt, nextTrackingStoppedAt, enabled, 0, nowIso, SESSION_ID],
   );
+
+  if (completedSessionSeconds > 0 && previous.trackingStartedAt) {
+    await db.runAsync(
+      `
+        INSERT INTO online_session_history (
+          id, started_at, ended_at, duration_seconds, start_area_label, end_area_label, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+      `,
+      [
+        `online_${Date.now()}_${Math.floor(Math.random() * 100000)}`,
+        previous.trackingStartedAt,
+        nowIso,
+        completedSessionSeconds,
+        previous.currentAreaLabel,
+        areaLabel,
+        nowIso,
+      ],
+    );
+  }
 
   return getSessionState();
 }
@@ -119,6 +141,21 @@ async function ensureSessionColumns(): Promise<void> {
   if (!names.has("accumulated_online_seconds")) {
     await db.execAsync(`ALTER TABLE session_state ADD COLUMN accumulated_online_seconds REAL DEFAULT 0`);
   }
+}
+
+async function ensureSessionHistoryTable(): Promise<void> {
+  const db = await getDb();
+  await db.execAsync(`
+    CREATE TABLE IF NOT EXISTS online_session_history (
+      id TEXT PRIMARY KEY NOT NULL,
+      started_at TEXT NOT NULL,
+      ended_at TEXT NOT NULL,
+      duration_seconds INTEGER NOT NULL,
+      start_area_label TEXT,
+      end_area_label TEXT,
+      created_at TEXT NOT NULL
+    )
+  `);
 }
 
 async function ensureSessionRow(): Promise<void> {

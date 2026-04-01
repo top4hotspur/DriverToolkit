@@ -30,6 +30,15 @@
     accumulated_online_seconds REAL NOT NULL DEFAULT 0,
     updated_at TEXT NOT NULL
   );`,
+  `CREATE TABLE IF NOT EXISTS online_session_history (
+    id TEXT PRIMARY KEY NOT NULL,
+    started_at TEXT NOT NULL,
+    ended_at TEXT NOT NULL,
+    duration_seconds INTEGER NOT NULL,
+    start_area_label TEXT,
+    end_area_label TEXT,
+    created_at TEXT NOT NULL
+  );`,
   `CREATE TABLE IF NOT EXISTS mileage_sessions (
     id TEXT PRIMARY KEY NOT NULL,
     started_at TEXT NOT NULL,

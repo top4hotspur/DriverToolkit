@@ -9,6 +9,14 @@ let state: SessionStateModel = {
   accumulatedOnlineSeconds: 0,
 };
 
+const completedOnlineSessions: Array<{
+  startedAt: string;
+  endedAt: string;
+  durationSeconds: number;
+  startAreaLabel: string | null;
+  endAreaLabel: string | null;
+}> = [];
+
 export async function getSessionState(): Promise<SessionStateModel> {
   return state;
 }
@@ -17,21 +25,28 @@ export async function setSessionMode(mode: SessionMode, areaLabel: string | null
   const now = new Date();
   const nowIso = now.toISOString();
 
-  let accumulatedOnlineSeconds = state.accumulatedOnlineSeconds;
   if (mode === "offline" && state.mode === "online" && state.trackingStartedAt) {
     const started = new Date(state.trackingStartedAt).getTime();
-    const deltaSeconds = Math.max(0, Math.floor((now.getTime() - started) / 1000));
-    accumulatedOnlineSeconds += deltaSeconds;
+    const durationSeconds = Math.max(0, Math.floor((now.getTime() - started) / 1000));
+    if (durationSeconds > 0) {
+      completedOnlineSessions.unshift({
+        startedAt: state.trackingStartedAt,
+        endedAt: nowIso,
+        durationSeconds,
+        startAreaLabel: state.currentAreaLabel,
+        endAreaLabel: areaLabel,
+      });
+    }
   }
 
   state = {
     ...state,
     mode,
     currentAreaLabel: areaLabel,
-    trackingStartedAt: mode === "online" ? nowIso : state.trackingStartedAt,
+    trackingStartedAt: mode === "online" ? nowIso : null,
     trackingStoppedAt: mode === "offline" ? nowIso : state.trackingStoppedAt,
     businessMileageTrackingEnabled: mode === "online",
-    accumulatedOnlineSeconds,
+    accumulatedOnlineSeconds: 0,
   };
   return state;
 }

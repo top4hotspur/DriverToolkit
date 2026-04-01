@@ -1,17 +1,22 @@
 {
   "expo": {
-    "name": "app",
-    "slug": "app",
+    "name": "Driver Toolkit",
+    "slug": "driver-toolkit",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "app",
+    "scheme": "drivertoolkit",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true
     },
     "android": {
+      "package": "com.drivertoolkit.mobile",
+      "permissions": [
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_FINE_LOCATION"
+      ],
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
@@ -27,6 +32,13 @@
     },
     "plugins": [
       "expo-router",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Driver Toolkit uses location for mileage tracking and area context while online."
+        }
+      ],
+      "expo-document-picker",
       [
         "expo-splash-screen",
         {
