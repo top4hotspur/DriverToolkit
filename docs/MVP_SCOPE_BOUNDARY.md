@@ -1,26 +1,26 @@
-# MVP Scope Boundary (Now vs Later)
+﻿# MVP Scope Boundary (Now vs Later)
 
 ## MVP Now (This Pass)
 
 - Local SQLite schema for required tables.
 - Strong TypeScript domain types and contracts.
 - Provider-neutral import adapter interfaces (`parseUberExport`, `parseBoltExport`, `parseLyftExport`).
-- Canonical metric calculator module.
-- Confidence and adaptive-window module.
+- Local Uber ZIP import pipeline.
+- Canonical first-pass truth metric persistence.
 - Recommendation, recovery, reports, and achievements output contracts.
 - Report registry and achievements registry as source-of-truth metadata layers.
-- 8 surface screen shells wired to typed placeholder intelligence data.
-- Reports intelligence-first layout with compact upload/sync status at top.
-- Local-first receipt input model for both camera capture and file upload metadata.
-- Navigation architecture with reports drill-down and achievements route.
+- Session mode architecture (`online`/`offline`) persisted locally.
+- GPS business mileage tracking active only in online mode.
+- Home screen split by session mode with offline planning blocks.
+- `Should I go online now?` comparative historical decision contract and placeholder logic.
+- Settings extensions for tax/compliance/radius controls.
+- Local-first new-achievement detection hooks after import.
 
 ## Later (Explicitly Deferred)
 
-- Real parser implementations for Uber/Bolt/Lyft files.
-- Real import pipeline wiring from file intake to normalized persistence.
-- Full truth-engine enrichment jobs (geofencing, bucketing, area tagging).
-- Decision engine runtime selection and snapshot generation.
-- Recovery detection algorithms over real imported rows.
+- Real parser implementations for Bolt/Lyft files.
+- Full truth-engine enrichment jobs (geofencing, advanced area tagging, richer comparability scoring).
+- Fully data-driven decision engine replacing placeholders.
 - Cloud receipt/document backup or any automatic upload mechanism.
 - Auth/subscription cloud integrations.
 - Any realtime/live dashboards, dispatch mirroring, or polling infra.

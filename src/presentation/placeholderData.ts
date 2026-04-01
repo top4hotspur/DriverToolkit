@@ -1,4 +1,4 @@
-import {
+ï»¿import {
   HaveIBeenHereBeforeContract,
   RecommendedActionContract,
   WhatUsuallyHappensNextContract,
@@ -17,23 +17,29 @@ export const placeholderDashboard: {
   opportunityNudge: string;
   lowValueAreas: Array<{ area: string; minAcceptFare: number; note: string }>;
 } = {
-  contextState: "Evaluating city-centre weekday 17:00-18:00 context",
+  contextState: "Evaluating weekday 17:00-18:00 context from historical patterns",
   recommendation: {
     action: "reposition",
     confidence: "MEDIUM",
     sampleSize: 12,
-    rationale: "Comparable starts from this area underperformed your hourly target in the first 30 minutes.",
+    rationale: "Comparable starts from this area underperformed your target benchmark in the first 30 minutes.",
     basisWindow: defaultBasis,
     alternative: {
       action: "short-wait-only",
       rationale: "If no job within 8 minutes, leave to avoid queue trap risk.",
     },
   },
-  opportunityNudge: "Nudge: North Dock starts average +£3.60/hr versus your current area.",
+  opportunityNudge: "Nearby BT7 historically performs better for this hour bucket.",
   lowValueAreas: [
     { area: "Airport Holding", minAcceptFare: 14.2, note: "High dead-mile tendency" },
     { area: "Retail Park East", minAcceptFare: 10.8, note: "Weak follow-on rate" },
   ],
+};
+
+export const placeholderOnlineGuidance = {
+  areaStrength: "This area is historically in your lower quartile for this time.",
+  nearbyAlternative: "BT7 is historically stronger within your configured travel radius.",
+  shiftHint: "Short wait only here unless first offer clears your minimum threshold.",
 };
 
 export const placeholderDiary: {
@@ -85,3 +91,4 @@ export const placeholderUsuallyNext: WhatUsuallyHappensNextContract = {
   confidence: "MEDIUM",
   sampleSize: 12,
 };
+

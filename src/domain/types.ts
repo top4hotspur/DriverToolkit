@@ -64,10 +64,14 @@ export interface ProviderImportRow {
   id: string;
   userId: string;
   provider: ProviderCode;
+  sourceFileName: string;
   fileName: string;
   fileHash: string | null;
+  fileSignature: string | null;
   fileType: "zip" | "csv";
   importedAt: string;
+  dataStartAt: string | null;
+  dataEndAt: string | null;
   recordCount: number;
   parseStatus: "pending" | "parsed" | "failed";
   parseNotes: string | null;
@@ -77,35 +81,79 @@ export interface TripRawRow {
   id: string;
   importId: string;
   provider: ProviderCode;
+  rawTripId: string;
+  providerTripId: string | null;
   rowIndex: number;
+  startedAt: string | null;
+  endedAt: string | null;
+  pickupLat: number | null;
+  pickupLng: number | null;
+  dropoffLat: number | null;
+  dropoffLng: number | null;
+  pickupArea: string | null;
+  dropoffArea: string | null;
+  fareGross: number | null;
+  surgeAmount: number | null;
+  tollAmount: number | null;
+  waitTimeAmount: number | null;
+  tipAmount: number | null;
+  durationMinutes: number | null;
+  tripDistanceMiles: number | null;
+  status: string | null;
   rawPayloadJson: string;
   createdAt: string;
 }
 
 export interface TripNormalizedRow {
   id: string;
+  tripId: string;
   importId: string;
   provider: ProviderCode;
-  providerTripId: string;
+  providerTripId: string | null;
   startedAt: string;
   endedAt: string;
-  startAreaCode: string | null;
-  endAreaCode: string | null;
-  startLat: number | null;
-  startLng: number | null;
-  endLat: number | null;
-  endLng: number | null;
-  waitTimeMinutes: number;
+  dayOfWeek: string;
+  hourBucket: string;
+  weekType: "weekday" | "weekend";
+  pickupAreaCode: string;
+  dropoffAreaCode: string;
+  pickupZoneKey: string;
+  dropoffZoneKey: string;
+  pickupLat: number | null;
+  pickupLng: number | null;
+  dropoffLat: number | null;
+  dropoffLng: number | null;
   tripDistanceMiles: number;
-  deadMiles: number;
-  fareBase: number;
-  fareSurge: number;
+  durationMinutes: number;
+  fareGross: number;
+  surgeAmount: number;
+  tollAmount: number;
+  waitTimeAmount: number;
   tipAmount: number;
-  tollsAmount: number;
-  feesAmount: number;
   earningsTotal: number;
+  inferredDeadMilesAfterTrip: number;
+  inferredReturnToCoreMiles: number;
+  geofenceTagsJson: string;
+  eventContextJson: string;
+  status: string;
   currency: string;
   createdAt: string;
+}
+
+export interface TripTruthMetricRow {
+  id: string;
+  tripId: string;
+  importId: string;
+  earningsTotal: number;
+  tripDistanceMiles: number;
+  fuelCost: number;
+  maintenanceCost: number;
+  trueNet: number;
+  trueNetPerHour: number;
+  trueNetPerMile: number;
+  targetGapHourly: number;
+  targetGapMile: number;
+  calculatedAt: string;
 }
 
 export type ReceiptSourceType = "camera" | "file-upload";
@@ -203,5 +251,3 @@ export interface EarningsLeakRow {
   status: "open" | "reviewing" | "closed";
   createdAt: string;
 }
-
-

@@ -1,4 +1,4 @@
-# Screen Shell Plan Mapped To HTML References
+﻿# Screen Shell Plan Mapped To HTML References
 
 ## Mapping
 
@@ -19,6 +19,21 @@
 - Detailed Analysis is a drill-down from Reports cards using registry IDs.
 - Achievements is inside Reports with its own route.
 - Auth sits outside the tab shell.
+
+## Home Mode Split
+
+- Online mode:
+  - Status pill: `Online - [Area]` with pulse.
+  - GPS business mileage tracking summary.
+  - Historical/context guidance cards only.
+  - No live earnings or live profit statements.
+- Offline mode:
+  - Tax progress block.
+  - Outstanding tasks block.
+  - PSV countdown (6-week warning window).
+  - Insurance countdown (6-week warning window).
+  - `Should I go online now?` action with historical comparative output.
+  - Contextual achievement highlight.
 
 ## Shell Intent Guarantees
 

@@ -1,39 +1,57 @@
-import { ProviderCode, TripNormalizedRow, TripRawRow } from "../../domain/types";
+import { IntermediateTripRecord, ProviderDetectionResult } from "../../domain/importTypes";
+import { ProviderCode } from "../../domain/types";
+import { detectProviderFromZip } from "./detectProvider";
+import { parseUberPrivacyZip } from "./parseUberExport";
 
 export interface ImportFileDescriptor {
   fileName: string;
   mimeType: string;
   extension: "zip" | "csv";
   byteLength: number;
-  contents: string | Uint8Array;
+  contentsBase64: string;
 }
 
 export interface ParsedImportBundle {
   provider: ProviderCode;
-  rawRows: Omit<TripRawRow, "id" | "createdAt">[];
-  normalizedTrips: Omit<TripNormalizedRow, "id" | "createdAt">[];
+  currency: string;
+  detection: ProviderDetectionResult;
+  sourceCsvNames: string[];
+  assumedColumns: string[];
+  intermediateTrips: IntermediateTripRecord[];
   warnings: string[];
 }
 
 export interface ProviderImportAdapter {
   provider: ProviderCode;
-  detect(file: ImportFileDescriptor): boolean;
+  detect(file: ImportFileDescriptor): Promise<ProviderDetectionResult>;
   parse(file: ImportFileDescriptor): Promise<ParsedImportBundle>;
 }
 
 export interface ImportEngine {
-  detectProvider(file: ImportFileDescriptor): ProviderCode | null;
+  detectProvider(file: ImportFileDescriptor): Promise<ProviderDetectionResult>;
   parseAndNormalize(file: ImportFileDescriptor): Promise<ParsedImportBundle>;
 }
 
 export async function parseUberExport(file: ImportFileDescriptor): Promise<ParsedImportBundle> {
-  return Promise.reject(new Error(`parseUberExport not yet wired for ${file.fileName}`));
+  return parseUberPrivacyZip(file);
 }
 
-export async function parseBoltExport(file: ImportFileDescriptor): Promise<ParsedImportBundle> {
-  return Promise.reject(new Error(`parseBoltExport not yet wired for ${file.fileName}`));
+export async function parseBoltExport(_file: ImportFileDescriptor): Promise<ParsedImportBundle> {
+  return Promise.reject(new Error("Bolt import parsing is not implemented in this pass."));
 }
 
-export async function parseLyftExport(file: ImportFileDescriptor): Promise<ParsedImportBundle> {
-  return Promise.reject(new Error(`parseLyftExport not yet wired for ${file.fileName}`));
+export async function parseLyftExport(_file: ImportFileDescriptor): Promise<ParsedImportBundle> {
+  return Promise.reject(new Error("Lyft import parsing is not implemented in this pass."));
 }
+
+export const uberAdapter: ProviderImportAdapter = {
+  provider: "uber",
+  async detect(file) {
+    return detectProviderFromZip({
+      fileName: file.fileName,
+      fileType: file.extension,
+      candidateCsvNames: [],
+    });
+  },
+  parse: parseUberExport,
+};
