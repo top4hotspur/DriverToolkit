@@ -1,8 +1,9 @@
-﻿export type TaskType =
+export type TaskType =
   | "receipt-review"
   | "review-flagged-trips"
   | "tax-update"
-  | "review-achievements";
+  | "review-achievements"
+  | "privacy-refresh";
 
 export type TaskPriority = "high" | "medium" | "low";
 

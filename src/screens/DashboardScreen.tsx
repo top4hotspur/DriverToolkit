@@ -27,14 +27,17 @@ import { getSessionState, setCurrentAreaLabel, setSessionMode } from "../state/s
 import { SessionStateModel } from "../state/sessionTypes";
 import { listStartPoints } from "../state/startPoints";
 import { StartPoint } from "../state/startPointTypes";
-import { shouldShowDueWarning, daysUntil } from "../utils/dueDates";
+import { daysUntil, shouldShowDueWarning } from "../utils/dueDates";
 import { deriveUkOutwardCode } from "../utils/postcodes";
 import {
   evidenceDetailFromSample,
   evidenceLabelFromConfidence,
+  formatDurationClock,
   formatGBP,
   formatMiles,
   formatPercent,
+  formatUkDate,
+  formatUkDateTime,
 } from "../utils/format";
 import { Card, ConfidenceBadge, KeyValueRow, PrimaryButton, ScreenShell } from "./ui";
 
@@ -44,6 +47,7 @@ const defaultMileageSummary: BusinessMileageSummary = {
   trackedBusinessMiles: 0,
   trackingStartedAt: null,
   trackingStoppedAt: null,
+  accumulatedOnlineSeconds: 0,
 };
 
 export function DashboardScreen() {
@@ -56,6 +60,7 @@ export function DashboardScreen() {
     trackingStartedAt: null,
     trackingStoppedAt: null,
     businessMileageTrackingEnabled: false,
+    accumulatedOnlineSeconds: 0,
   });
   const [mileageSummary, setMileageSummary] = useState<BusinessMileageSummary>(defaultMileageSummary);
   const [settings, setSettings] = useState<Awaited<ReturnType<typeof getAppSettings>> | null>(null);
@@ -65,17 +70,18 @@ export function DashboardScreen() {
   const [latestImportToken, setLatestImportToken] = useState<string | null>(null);
   const [newAchievementResult, setNewAchievementResult] = useState(() => detectNewAchievementsAfterImport(0));
   const [actionMessage, setActionMessage] = useState<string | null>(null);
+  const [liveNow, setLiveNow] = useState(() => Date.now());
 
   const dueWarnings = useMemo(() => {
     const warnings: string[] = [];
     if (settings?.psvDueDate && shouldShowDueWarning(settings.psvDueDate, 42)) {
-      warnings.push(`PSV due in ${daysUntil(settings.psvDueDate)} days`);
+      warnings.push(`PSV due in ${daysUntil(settings.psvDueDate)} days (${formatUkDate(settings.psvDueDate)})`);
     }
     if (settings?.insuranceDueDate && shouldShowDueWarning(settings.insuranceDueDate, 42)) {
-      warnings.push(`Insurance renewal due in ${daysUntil(settings.insuranceDueDate)} days`);
+      warnings.push(`Insurance renewal due in ${daysUntil(settings.insuranceDueDate)} days (${formatUkDate(settings.insuranceDueDate)})`);
     }
     if (settings?.operatorLicenceDueDate && shouldShowDueWarning(settings.operatorLicenceDueDate, 42)) {
-      warnings.push(`Operator licence due in ${daysUntil(settings.operatorLicenceDueDate)} days`);
+      warnings.push(`Operator licence due in ${daysUntil(settings.operatorLicenceDueDate)} days (${formatUkDate(settings.operatorLicenceDueDate)})`);
     }
     return warnings;
   }, [settings?.insuranceDueDate, settings?.operatorLicenceDueDate, settings?.psvDueDate]);
@@ -123,6 +129,7 @@ export function DashboardScreen() {
     });
 
     const interval = setInterval(() => {
+      setLiveNow(Date.now());
       getBusinessMileageSummary()
         .then((next) => {
           if (mounted) {
@@ -134,7 +141,7 @@ export function DashboardScreen() {
             setActionMessage("Mileage tracking summary is temporarily unavailable.");
           }
         });
-    }, 10_000);
+    }, 1_000);
 
     return () => {
       mounted = false;
@@ -224,7 +231,7 @@ export function DashboardScreen() {
           headline: "Add favourites",
           rationale: "Don't forget to set your favourites - you can always change these later.",
           evidenceLabel: "No evidence",
-          evidenceDetail: "No saved start points available for comparison yet.",
+          evidenceDetail: "No saved favourites available for comparison yet.",
           basisWindowDays: 90,
           fallbackMessage: "Add at least one favourite in Settings first.",
         });
@@ -318,13 +325,13 @@ export function DashboardScreen() {
   }
 
   const userFacingAction = mapDecisionLabel(rec.action);
+  const currentOnlineSeconds =
+    session.mode === "online" && session.trackingStartedAt
+      ? session.accumulatedOnlineSeconds + Math.max(0, Math.floor((liveNow - new Date(session.trackingStartedAt).getTime()) / 1000))
+      : session.accumulatedOnlineSeconds;
 
   return (
-    <ScreenShell
-      title="Dashboard"
-      subtitle="Decision-first co-pilot built on imported history and local controls."
-      footerCta={session.mode === "offline" ? <PrimaryButton label="Upload privacy file" onPress={() => router.push("/upload")} /> : undefined}
-    >
+    <ScreenShell title="Dashboard" subtitle="Decision-first co-pilot built on imported history and local controls.">
       <Card title="Session Status">
         <Pressable onPress={onToggleSession} style={[styles.statusPill, session.mode === "online" ? styles.onlinePill : styles.offlinePill]}>
           {session.mode === "online" ? (
@@ -371,18 +378,19 @@ export function DashboardScreen() {
 
           <Card title="What Usually Happens Here?">
             <KeyValueRow label="Average wait here" value={`${placeholderBeenHereBefore.averageWaitMinutes.toFixed(1)} mins`} />
-            <KeyValueRow label="Average first fare here" value={formatGBP(placeholderBeenHereBefore.averageFirstFare)} />
+            <KeyValueRow label="Average trip value" value={formatGBP(placeholderBeenHereBefore.averageFirstFare)} />
             <KeyValueRow
-              label="Typical 60 / 90 min return"
+              label="Typical 60 / 90 min outcome after starting here"
               value={`${formatGBP(placeholderBeenHereBefore.likelyOutcome60Minutes)} / ${formatGBP(placeholderBeenHereBefore.likelyOutcome90Minutes)}`}
             />
-            <KeyValueRow label="Follow-on chance" value={formatPercent(placeholderBeenHereBefore.followOnRate)} />
+            <KeyValueRow label="Chance of another trip within 30 min" value={formatPercent(placeholderBeenHereBefore.followOnRate)} />
             <KeyValueRow label="Most common next job type" value={placeholderUsuallyNext.likelyNextJobType} />
           </Card>
 
           <Card title="Business Mileage Tracking">
             <KeyValueRow label="Tracking status" value={mileageSummary.active ? "Active" : "Paused"} />
             <KeyValueRow label="Tracked business miles" value={formatMiles(mileageSummary.trackedBusinessMiles)} />
+            <KeyValueRow label="Driver Toolkit online session time" value={formatDurationClock(currentOnlineSeconds)} />
             <Text>GPS mileage tracking runs only while online.</Text>
           </Card>
 
@@ -436,7 +444,7 @@ export function DashboardScreen() {
             ))}
             {getCaughtUpState(outstandingActions) ? (
               <View style={{ gap: 8 }}>
-                <Text>You're all caught up!</Text>
+                <Text>You're all caught up.</Text>
               </View>
             ) : null}
           </Card>
@@ -446,12 +454,13 @@ export function DashboardScreen() {
             <KeyValueRow label="Estimated liability" value={formatGBP(estimatedLiability)} />
             <KeyValueRow label="Progress" value={formatPercent(taxProgressRatio)} />
             <KeyValueRow label="Remaining gap" value={formatGBP(Math.max(estimatedLiability - taxSavings, 0))} />
+            <KeyValueRow label="Tax data correct to" value={formatUkDate(settings?.taxCorrectToDate)} />
           </Card>
 
           <Card title="Achievement Highlight">
             <Text>{offlineHighlight.title}</Text>
             <Text>{offlineHighlight.metricValue}</Text>
-            <Text>{`When: ${offlineHighlight.occurredAt}`}</Text>
+            <Text>{`When: ${formatUkDateTime(offlineHighlight.occurredAt)}`}</Text>
             <Text>{offlineHighlight.oneLineExplanation}</Text>
             {newAchievementResult.hasNewAchievements ? <Text>{`New since upload: ${newAchievementResult.events[0].headline}`}</Text> : null}
           </Card>
@@ -460,7 +469,6 @@ export function DashboardScreen() {
             <View style={styles.quickActionsRow}>
               <PrimaryButton label="Upload expense" onPress={() => router.push("/reports")} />
               <PrimaryButton label="Add cash expense" onPress={() => router.push("/reports")} />
-              <PrimaryButton label="Upload privacy file" onPress={() => router.push("/upload")} />
             </View>
           </Card>
         </>

@@ -27,6 +27,7 @@
     tracking_started_at TEXT,
     tracking_stopped_at TEXT,
     business_mileage_tracking_enabled INTEGER NOT NULL,
+    accumulated_online_seconds REAL NOT NULL DEFAULT 0,
     updated_at TEXT NOT NULL
   );`,
   `CREATE TABLE IF NOT EXISTS mileage_sessions (

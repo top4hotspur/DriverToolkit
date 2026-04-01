@@ -1,6 +1,5 @@
-﻿import { OfflineAction } from "../contracts/tasks";
+import { OfflineAction } from "../contracts/tasks";
 import { getDb } from "../db/client.native";
-import { getAppSettings } from "./settingsState.native";
 
 export async function getOutstandingActions(context: {
   hasNewAchievements: boolean;
@@ -8,7 +7,6 @@ export async function getOutstandingActions(context: {
 }): Promise<OfflineAction[]> {
   const db = await getDb();
   const now = new Date();
-  const settings = await getAppSettings();
   const completed = await listCompletedActionIds();
 
   const actions: OfflineAction[] = [];
@@ -65,6 +63,30 @@ export async function getOutstandingActions(context: {
     });
   }
 
+  const latestImport = await db.getFirstAsync<{ importedAt: string | null }>(
+    `
+      SELECT imported_at as importedAt
+      FROM provider_imports
+      WHERE parse_status = 'parsed'
+      ORDER BY imported_at DESC
+      LIMIT 1
+    `,
+  );
+
+  const privacyRefreshId = `privacy-refresh-${monthToken(now)}`;
+  if (latestImport?.importedAt && isOlderThanDays(latestImport.importedAt, 27) && !completed.has(privacyRefreshId)) {
+    actions.push({
+      id: privacyRefreshId,
+      type: "privacy-refresh",
+      label: "Refresh your privacy file",
+      priority: "medium",
+      completed: false,
+      actionLabel: "Open Settings",
+      relatedRoute: "/settings",
+      recurrenceKey: monthToken(now),
+    });
+  }
+
   if (context.hasNewAchievements) {
     const achievementsId = `achievements-${context.latestImportToken ?? monthToken(now)}`;
     if (!completed.has(achievementsId)) {
@@ -113,9 +135,9 @@ function monthToken(date: Date): string {
 
 function isOlderThanDays(dateIso: string | null, days: number): boolean {
   if (!dateIso) {
-    return true;
+    return false;
   }
 
   const ageMs = Date.now() - new Date(dateIso).getTime();
-  return ageMs > days * 24 * 60 * 60 * 1000;
+  return ageMs >= days * 24 * 60 * 60 * 1000;
 }

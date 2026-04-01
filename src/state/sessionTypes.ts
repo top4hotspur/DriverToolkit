@@ -1,4 +1,4 @@
-﻿export type SessionMode = "online" | "offline";
+export type SessionMode = "online" | "offline";
 
 export interface SessionStateModel {
   mode: SessionMode;
@@ -6,9 +6,9 @@ export interface SessionStateModel {
   trackingStartedAt: string | null;
   trackingStoppedAt: string | null;
   businessMileageTrackingEnabled: boolean;
+  accumulatedOnlineSeconds: number;
 }
 
 export interface SessionToggleResult {
   state: SessionStateModel;
 }
-

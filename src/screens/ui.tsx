@@ -1,5 +1,5 @@
-﻿import { ReactNode } from "react";
-import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ReactNode } from "react";
+import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
 export function ScreenShell(props: {
   title: string;
@@ -8,12 +8,18 @@ export function ScreenShell(props: {
   footerCta?: ReactNode;
 }) {
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      <Text style={styles.title}>{props.title}</Text>
-      {props.subtitle ? <Text style={styles.subtitle}>{props.subtitle}</Text> : null}
-      {props.children}
-      {props.footerCta ? <View style={styles.footer}>{props.footerCta}</View> : null}
-    </ScrollView>
+    <KeyboardAvoidingView
+      style={styles.container}
+      behavior={Platform.select({ ios: "padding", android: "height", default: undefined })}
+      keyboardVerticalOffset={Platform.select({ ios: 88, android: 0, default: 0 })}
+    >
+      <ScrollView style={styles.container} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+        <Text style={styles.title}>{props.title}</Text>
+        {props.subtitle ? <Text style={styles.subtitle}>{props.subtitle}</Text> : null}
+        {props.children}
+        {props.footerCta ? <View style={styles.footer}>{props.footerCta}</View> : null}
+      </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 

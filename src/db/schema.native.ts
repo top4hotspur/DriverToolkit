@@ -71,6 +71,10 @@ async function runSchemaMigrations(): Promise<void> {
     { name: "training_hours_completed", sqlType: "REAL DEFAULT 0" },
     { name: "tax_correct_to_date", sqlType: "TEXT" },
   ]);
+
+  await addMissingColumns("session_state", [
+    { name: "accumulated_online_seconds", sqlType: "REAL DEFAULT 0" },
+  ]);
 }
 
 async function addMissingColumns(

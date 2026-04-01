@@ -6,6 +6,7 @@ let summary: BusinessMileageSummary = {
   trackedBusinessMiles: 0,
   trackingStartedAt: null,
   trackingStoppedAt: null,
+  accumulatedOnlineSeconds: 0,
 };
 
 export async function startBusinessMileageTracking(_currentAreaLabel: string | null): Promise<TrackingStartResult> {

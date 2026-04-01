@@ -1,5 +1,7 @@
+import { useRouter } from "expo-router";
 import { useEffect, useState } from "react";
 import { Text, TextInput, View } from "react-native";
+import { getLatestImportSummary } from "../engines/import/importPersistence";
 import { placeholderSettings } from "../presentation/placeholderSettings";
 import { getAppSettings, saveAppSettings } from "../state/settingsState";
 import { AppSettingsModel } from "../state/settingsTypes";
@@ -7,10 +9,11 @@ import { addStartPoint, listStartPoints, removeStartPoint, updateStartPoint } fr
 import { StartPoint } from "../state/startPointTypes";
 import { getTargetSettings, saveTargetSettings } from "../state/targetsState";
 import { getVehicleCostSettings, saveVehicleCostSettings } from "../state/vehicleCostState";
-import { formatGBP } from "../utils/format";
+import { formatGBP, formatUkDate } from "../utils/format";
 import { Card, KeyValueRow, PrimaryButton, ScreenShell } from "./ui";
 
 export function SettingsScreen() {
+  const router = useRouter();
   const [settings, setSettings] = useState<AppSettingsModel | null>(null);
   const [targetHourlyInput, setTargetHourlyInput] = useState(`${placeholderSettings.targetHourly}`);
   const [targetMileInput, setTargetMileInput] = useState(`${placeholderSettings.targetPerMile}`);
@@ -19,14 +22,19 @@ export function SettingsScreen() {
   const [maintenanceInput, setMaintenanceInput] = useState(`${placeholderSettings.vehicleAssumptions.maintenancePerMile}`);
   const [taxSavingsInput, setTaxSavingsInput] = useState(`${placeholderSettings.taxSavingsAmount}`);
   const [radiusInput, setRadiusInput] = useState(`${placeholderSettings.maxStartShiftTravelRadiusMiles}`);
+  const [psvDueDateInput, setPsvDueDateInput] = useState(placeholderSettings.psvDueDate ?? "");
+  const [insuranceDueDateInput, setInsuranceDueDateInput] = useState(placeholderSettings.insuranceDueDate ?? "");
+  const [operatorDueDateInput, setOperatorDueDateInput] = useState(placeholderSettings.operatorLicenceDueDate ?? "");
+  const [trainingHoursInput, setTrainingHoursInput] = useState(`${placeholderSettings.trainingHoursCompleted}`);
   const [startPoints, setStartPoints] = useState<StartPoint[]>([]);
   const [newPostcode, setNewPostcode] = useState("");
   const [newLabel, setNewLabel] = useState("");
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
+  const [latestImportAt, setLatestImportAt] = useState<string | null>(null);
 
   useEffect(() => {
-    Promise.all([getAppSettings(), listStartPoints(), getTargetSettings(), getVehicleCostSettings()])
-      .then(([nextSettings, points, targets, vehicle]) => {
+    Promise.all([getAppSettings(), listStartPoints(), getTargetSettings(), getVehicleCostSettings(), getLatestImportSummary()])
+      .then(([nextSettings, points, targets, vehicle, importSummary]) => {
         setSettings(nextSettings);
         setStartPoints(points);
         setTargetHourlyInput(`${targets.targetHourly}`);
@@ -36,6 +44,11 @@ export function SettingsScreen() {
         setMaintenanceInput(`${vehicle.maintenancePerMile}`);
         setTaxSavingsInput(`${nextSettings.taxSavingsAmount}`);
         setRadiusInput(`${nextSettings.maxStartShiftTravelRadiusMiles}`);
+        setPsvDueDateInput(nextSettings.psvDueDate ?? "");
+        setInsuranceDueDateInput(nextSettings.insuranceDueDate ?? "");
+        setOperatorDueDateInput(nextSettings.operatorLicenceDueDate ?? "");
+        setTrainingHoursInput(`${nextSettings.trainingHoursCompleted.toFixed(2)}`);
+        setLatestImportAt(importSummary?.importedAt ?? null);
       })
       .catch(() => {
         setSettings(null);
@@ -105,6 +118,7 @@ export function SettingsScreen() {
     const parsedMaintenance = Number(maintenanceInput);
     const parsedTaxSavings = Number(taxSavingsInput);
     const parsedRadius = Number(radiusInput);
+    const parsedTraining = Number(trainingHoursInput);
 
     if (
       !Number.isFinite(parsedHourly) ||
@@ -113,7 +127,8 @@ export function SettingsScreen() {
       !Number.isFinite(parsedFuel) ||
       !Number.isFinite(parsedMaintenance) ||
       !Number.isFinite(parsedTaxSavings) ||
-      !Number.isFinite(parsedRadius)
+      !Number.isFinite(parsedRadius) ||
+      !Number.isFinite(parsedTraining)
     ) {
       setSaveMessage("Check values and use valid numbers before saving.");
       return;
@@ -134,6 +149,10 @@ export function SettingsScreen() {
           ...effective,
           taxSavingsAmount: parsedTaxSavings,
           maxStartShiftTravelRadiusMiles: parsedRadius,
+          psvDueDate: psvDueDateInput.trim() || null,
+          insuranceDueDate: insuranceDueDateInput.trim() || null,
+          operatorLicenceDueDate: operatorDueDateInput.trim() || null,
+          trainingHoursCompleted: Math.round(parsedTraining * 100) / 100,
         }),
       ]);
 
@@ -151,6 +170,10 @@ export function SettingsScreen() {
       setMaintenanceInput(`${vehicle.maintenancePerMile}`);
       setTaxSavingsInput(`${nextSettings.taxSavingsAmount}`);
       setRadiusInput(`${nextSettings.maxStartShiftTravelRadiusMiles}`);
+      setPsvDueDateInput(nextSettings.psvDueDate ?? "");
+      setInsuranceDueDateInput(nextSettings.insuranceDueDate ?? "");
+      setOperatorDueDateInput(nextSettings.operatorLicenceDueDate ?? "");
+      setTrainingHoursInput(`${nextSettings.trainingHoursCompleted.toFixed(2)}`);
       setSaveMessage("Settings saved.");
     } catch {
       setSaveMessage("Couldn't save settings right now. Try again.");
@@ -158,7 +181,7 @@ export function SettingsScreen() {
   };
 
   return (
-    <ScreenShell title="Settings" subtitle="Decision controls, Favourites, and compliance details.">
+    <ScreenShell title="Settings" subtitle="Decision controls, Favourites, compliance details, and privacy upload.">
       <Card title="Targets (Editable)">
         <Text>Target £/hour</Text>
         <TextInput value={targetHourlyInput} onChangeText={setTargetHourlyInput} style={styles.input} keyboardType="decimal-pad" />
@@ -166,38 +189,10 @@ export function SettingsScreen() {
         <TextInput value={targetMileInput} onChangeText={setTargetMileInput} style={styles.input} keyboardType="decimal-pad" />
       </Card>
 
-      <Card title="Vehicle Assumptions">
-        <Text>MPG</Text>
-        <TextInput value={mpgInput} onChangeText={setMpgInput} style={styles.input} keyboardType="decimal-pad" />
-        <Text>Fuel £/L</Text>
-        <TextInput value={fuelInput} onChangeText={setFuelInput} style={styles.input} keyboardType="decimal-pad" />
-        <Text>Maintenance £/mile</Text>
-        <TextInput value={maintenanceInput} onChangeText={setMaintenanceInput} style={styles.input} keyboardType="decimal-pad" />
-        <Text>HMRC recommend setting this at 45p per mile.</Text>
-        <Text>Fuel stays user-editable now and can later be refreshed from fuel receipts.</Text>
-      </Card>
-
       <Card title="Start Preferences">
         <Text>Max start-shift travel radius (miles)</Text>
         <TextInput value={radiusInput} onChangeText={setRadiusInput} style={styles.input} keyboardType="decimal-pad" />
         <Text>Used when checking whether a nearby area would be a better place to begin working.</Text>
-      </Card>
-
-      <Card title="Tax">
-        <Text>Tax savings amount</Text>
-        <TextInput value={taxSavingsInput} onChangeText={setTaxSavingsInput} style={styles.input} keyboardType="decimal-pad" />
-        <PrimaryButton label="Save controls" onPress={saveControls} />
-        {saveMessage ? <Text>{saveMessage}</Text> : null}
-        <KeyValueRow label="Saved tax amount" value={formatGBP(effective.taxSavingsAmount)} />
-        <KeyValueRow label="Estimated tax liability" value={formatGBP(effective.estimatedTaxLiability)} />
-        <KeyValueRow label="Tax correct to" value={effective.taxCorrectToDate ?? "Not set"} />
-      </Card>
-
-      <Card title="Compliance">
-        <KeyValueRow label="PSV due date" value={effective.psvDueDate ?? "Not set"} />
-        <KeyValueRow label="Insurance due date" value={effective.insuranceDueDate ?? "Not set"} />
-        <KeyValueRow label="Operator licence expiry" value={effective.operatorLicenceDueDate ?? "Not set"} />
-        <KeyValueRow label="Training hours completed" value={effective.trainingHoursCompleted.toFixed(2)} />
       </Card>
 
       <Card title="Favourites">
@@ -220,6 +215,54 @@ export function SettingsScreen() {
             </View>
           ))
         )}
+      </Card>
+
+      <Card title="Vehicle Assumptions">
+        <Text>MPG</Text>
+        <TextInput value={mpgInput} onChangeText={setMpgInput} style={styles.input} keyboardType="decimal-pad" />
+        <Text>Fuel £/L</Text>
+        <TextInput value={fuelInput} onChangeText={setFuelInput} style={styles.input} keyboardType="decimal-pad" />
+        <Text>Maintenance £/mile</Text>
+        <TextInput value={maintenanceInput} onChangeText={setMaintenanceInput} style={styles.input} keyboardType="decimal-pad" />
+        <Text>HMRC recommend setting this at 45p per mile.</Text>
+        <Text>Fuel stays user-editable now and can later be refreshed from fuel receipts.</Text>
+      </Card>
+
+      <Card title="Tax">
+        <Text>Tax savings amount</Text>
+        <TextInput value={taxSavingsInput} onChangeText={setTaxSavingsInput} style={styles.input} keyboardType="decimal-pad" />
+        <KeyValueRow label="Saved tax amount" value={formatGBP(effective.taxSavingsAmount)} />
+        <KeyValueRow label="Estimated tax liability" value={formatGBP(effective.estimatedTaxLiability)} />
+        <KeyValueRow label="Tax correct to" value={formatUkDate(effective.taxCorrectToDate)} />
+      </Card>
+
+      <Card title="Compliance">
+        <Text>PSV due date (YYYY-MM-DD)</Text>
+        <TextInput value={psvDueDateInput} onChangeText={setPsvDueDateInput} style={styles.input} />
+        <Text>{`Display: ${formatUkDate(psvDueDateInput || null)}`}</Text>
+
+        <Text>Insurance due date (YYYY-MM-DD)</Text>
+        <TextInput value={insuranceDueDateInput} onChangeText={setInsuranceDueDateInput} style={styles.input} />
+        <Text>{`Display: ${formatUkDate(insuranceDueDateInput || null)}`}</Text>
+
+        <Text>Operator licence expiry (YYYY-MM-DD)</Text>
+        <TextInput value={operatorDueDateInput} onChangeText={setOperatorDueDateInput} style={styles.input} />
+        <Text>{`Display: ${formatUkDate(operatorDueDateInput || null)}`}</Text>
+
+        <Text>Training hours completed</Text>
+        <TextInput value={trainingHoursInput} onChangeText={setTrainingHoursInput} style={styles.input} keyboardType="decimal-pad" />
+        <Text>{`Saved to 2dp: ${(Number(trainingHoursInput) || 0).toFixed(2)}`}</Text>
+      </Card>
+
+      <Card title="Privacy Upload">
+        <Text>Upload your latest privacy file from here when you are ready to refresh decisions.</Text>
+        <PrimaryButton label="Open upload" onPress={() => router.push("/upload")} />
+        <Text>{`Latest import: ${latestImportAt ? formatUkDate(latestImportAt) : "No imports yet"}`}</Text>
+      </Card>
+
+      <Card title="Save">
+        <PrimaryButton label="Save controls" onPress={saveControls} />
+        {saveMessage ? <Text>{saveMessage}</Text> : null}
       </Card>
     </ScreenShell>
   );

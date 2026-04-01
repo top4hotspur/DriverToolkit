@@ -137,6 +137,7 @@ export async function getBusinessMileageSummary(): Promise<BusinessMileageSummar
     trackedBusinessMiles: round2(row?.trackedBusinessMiles ?? 0),
     trackingStartedAt: row?.trackingStartedAt ?? null,
     trackingStoppedAt: row?.trackingStoppedAt ?? null,
+    accumulatedOnlineSeconds: 0,
   };
 }
 

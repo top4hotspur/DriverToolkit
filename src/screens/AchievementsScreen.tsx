@@ -1,6 +1,6 @@
 ﻿import { Alert, Text } from "react-native";
 import { placeholderAchievements } from "../presentation/placeholderAchievements";
-import { evidenceDetailFromSample, evidenceLabelFromConfidence } from "../utils/format";
+import { evidenceDetailFromSample, evidenceLabelFromConfidence, formatUkDateTime } from "../utils/format";
 import { Card, ConfidenceBadge, KeyValueRow, PrimaryButton, ScreenShell } from "./ui";
 
 export function AchievementsScreen() {
@@ -20,7 +20,7 @@ export function AchievementsScreen() {
       {placeholderAchievements.cards.map((card) => (
         <Card key={card.type} title={card.title}>
           <KeyValueRow label="Metric" value={card.metricValue} />
-          <KeyValueRow label="Date / Time" value={card.occurredAt} />
+          <KeyValueRow label="Date / Time" value={formatUkDateTime(card.occurredAt)} />
           <KeyValueRow label="Context" value={card.areaOrContext} />
           <Text>{card.oneLineExplanation}</Text>
           <ConfidenceBadge

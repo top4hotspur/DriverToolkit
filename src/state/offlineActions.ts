@@ -1,6 +1,7 @@
-﻿import { OfflineAction } from "../contracts/tasks";
+import { OfflineAction } from "../contracts/tasks";
 
 let completed = new Set<string>();
+let latestImportedAt: string | null = new Date(Date.now() - 28 * 24 * 60 * 60 * 1000).toISOString();
 
 export async function getOutstandingActions(context: {
   hasNewAchievements: boolean;
@@ -30,6 +31,18 @@ export async function getOutstandingActions(context: {
     },
   ];
 
+  if (latestImportedAt && isOlderThanDays(latestImportedAt, 27)) {
+    base.push({
+      id: `privacy-refresh-${now.getUTCFullYear()}-${now.getUTCMonth() + 1}`,
+      type: "privacy-refresh",
+      label: "Refresh your privacy file",
+      priority: "medium",
+      completed: false,
+      actionLabel: "Open Settings",
+      relatedRoute: "/settings",
+    });
+  }
+
   if (context.hasNewAchievements) {
     base.push({
       id: `achievements-${context.latestImportToken ?? "none"}`,
@@ -47,4 +60,12 @@ export async function getOutstandingActions(context: {
 
 export async function completeOutstandingAction(actionId: string): Promise<void> {
   completed.add(actionId);
+}
+
+function isOlderThanDays(dateIso: string | null, days: number): boolean {
+  if (!dateIso) {
+    return false;
+  }
+  const ageMs = Date.now() - new Date(dateIso).getTime();
+  return ageMs >= days * 24 * 60 * 60 * 1000;
 }

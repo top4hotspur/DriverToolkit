@@ -1,9 +1,10 @@
-﻿export interface BusinessMileageSummary {
+export interface BusinessMileageSummary {
   active: boolean;
   activeSessionId: string | null;
   trackedBusinessMiles: number;
   trackingStartedAt: string | null;
   trackingStoppedAt: string | null;
+  accumulatedOnlineSeconds: number;
 }
 
 export interface TrackingStartResult {
