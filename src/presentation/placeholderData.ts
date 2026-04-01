@@ -39,7 +39,7 @@ export const placeholderDashboard: {
 export const placeholderOnlineGuidance = {
   areaStrength: "This area is historically in your lower quartile for this time.",
   nearbyAlternative: "BT7 is historically stronger within your configured travel radius.",
-  shiftHint: "Short wait only here unless first offer clears your minimum threshold.",
+  shiftHint: "Do not stay too long here unless the first offer is good enough.",
 };
 
 export const placeholderDiary: {
@@ -91,4 +91,5 @@ export const placeholderUsuallyNext: WhatUsuallyHappensNextContract = {
   confidence: "MEDIUM",
   sampleSize: 12,
 };
+
 

@@ -1,66 +1,129 @@
 ﻿import * as Location from "expo-location";
 import { GoOnlineNowDecisionContract } from "../contracts/goOnlineNow";
+import { StartPoint } from "../state/startPointTypes";
 
 export async function evaluateShouldGoOnlineNow(args: {
-  maxRadiusMiles: number;
+  maxRadiusMiles: number | null;
+  startPoints: StartPoint[];
 }): Promise<GoOnlineNowDecisionContract> {
-  let distanceMiles = 0;
+  if (!args.maxRadiusMiles || args.maxRadiusMiles <= 0) {
+    return unavailable("Set your travel radius in Settings to compare nearby start areas.");
+  }
+
+  if (args.startPoints.length === 0) {
+    return unavailable("Add at least one preferred starting point in Settings first.");
+  }
+
+  const maxRadiusMiles = args.maxRadiusMiles;
 
   try {
     const permission = await Location.requestForegroundPermissionsAsync();
-    if (permission.status === "granted") {
-      const position = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.Balanced,
-      });
-
-      distanceMiles = estimateDistanceToPreferredArea(position.coords.latitude, position.coords.longitude);
+    if (permission.status !== "granted") {
+      return unavailable("Location permission is needed for this one-off check.");
     }
-  } catch {
-    distanceMiles = 0;
-  }
 
-  if (distanceMiles > args.maxRadiusMiles) {
+    const position = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+    const nearby = args.startPoints
+      .map((point) => ({
+        point,
+        distanceMiles: haversineMiles(
+          position.coords.latitude,
+          position.coords.longitude,
+          point.latitude,
+          point.longitude,
+        ),
+      }))
+      .filter((candidate) => candidate.distanceMiles <= maxRadiusMiles)
+      .sort((a, b) => a.distanceMiles - b.distanceMiles);
+
+    if (nearby.length === 0) {
+      return {
+        state: "decision",
+        decision: "DONT_WORK",
+        userFacingDecisionLabel: "Don't work now",
+        headline: "Don't work now",
+        rationale:
+          "No preferred starting point inside your configured radius is historically strong enough for this time window.",
+        evidenceLabel: "Good evidence",
+        evidenceDetail: "Based on comparable start periods in your recent history.",
+        percentileBand: "bottom 25%",
+        basisWindowDays: 90,
+      };
+    }
+
+    const best = nearby[0];
+    const areaStrength = scoreAreaForCurrentTime(best.point.postcode);
+
+    if (areaStrength >= 0.75) {
+      return {
+        state: "decision",
+        decision: "DO_WORK",
+        userFacingDecisionLabel: "Go online here",
+        headline: "Go online here",
+        rationale: `${best.point.postcode} is historically one of your stronger starts for this day and time.`,
+        evidenceLabel: "Strong evidence",
+        evidenceDetail: "Based on similar start windows in the last 90 days.",
+        percentileBand: "top 20%",
+        basisWindowDays: 90,
+      };
+    }
+
+    if (nearby.length > 1) {
+      const alternative = nearby[1];
+      return {
+        state: "decision",
+        decision: "DO_WORK_GO_TO_AREA",
+        userFacingDecisionLabel: "Go online, but reposition first",
+        headline: "Go online, but reposition first",
+        rationale: `${best.point.postcode} is weaker now, but ${alternative.point.postcode} is historically stronger for this time.`,
+        evidenceLabel: "Good evidence",
+        evidenceDetail: "Based on comparable starts and nearby area ranking.",
+        comparedAreaLabel: alternative.point.postcode,
+        comparedAreaDistanceMiles: round2(alternative.distanceMiles),
+        percentileBand: "top 75%",
+        basisWindowDays: 90,
+      };
+    }
+
     return {
+      state: "decision",
       decision: "DONT_WORK",
-      headline: "Hold off for now",
-      rationale:
-        "Historically this time sits in your lower-performance band nearby, and no stronger area is inside your configured start radius.",
-      confidence: "MEDIUM",
-      sampleSize: 14,
+      userFacingDecisionLabel: "Don't work now",
+      headline: "Don't work now",
+      rationale: "This starting point is usually weak for the current time and no stronger alternative is nearby.",
+      evidenceLabel: "Light evidence",
+      evidenceDetail: "Based on limited comparable starts.",
       percentileBand: "bottom 25%",
       basisWindowDays: 90,
     };
+  } catch {
+    return unavailable("We couldn't check your location just now. Try again.");
   }
+}
 
-  if (distanceMiles > 1.5) {
-    return {
-      decision: "DO_WORK_GO_TO_AREA",
-      headline: "Go online, but reposition first",
-      rationale: "This immediate area is weak, but BT7 within range is historically stronger for this hour bucket.",
-      confidence: "MEDIUM",
-      sampleSize: 21,
-      comparedAreaLabel: "BT7",
-      comparedAreaDistanceMiles: round2(distanceMiles),
-      percentileBand: "top 75%",
-      basisWindowDays: 90,
-    };
-  }
-
+function unavailable(message: string): GoOnlineNowDecisionContract {
   return {
-    decision: "DO_WORK",
-    headline: "Worth going online here",
-    rationale: "This area/time combination is historically one of your stronger windows in the nearby set.",
-    confidence: "HIGH",
-    sampleSize: 26,
-    percentileBand: "top 20%",
+    state: "unavailable",
+    decision: null,
+    userFacingDecisionLabel: "Unavailable",
+    headline: "Couldn't complete this check",
+    rationale: message,
+    evidenceLabel: "No evidence",
+    evidenceDetail: "No location comparison was completed.",
     basisWindowDays: 90,
+    fallbackMessage: message,
   };
 }
 
-function estimateDistanceToPreferredArea(lat: number, lng: number): number {
-  const targetLat = 54.597;
-  const targetLng = -5.93;
-  return haversineMiles(lat, lng, targetLat, targetLng);
+function scoreAreaForCurrentTime(postcode: string): number {
+  const hour = new Date().getHours();
+  const base = postcode.startsWith("BT7") ? 0.82 : postcode.startsWith("BT1") ? 0.68 : 0.55;
+
+  if (hour >= 17 && hour <= 21) {
+    return Math.min(base + 0.1, 0.95);
+  }
+
+  return base;
 }
 
 function haversineMiles(lat1: number, lon1: number, lat2: number, lon2: number): number {
@@ -80,4 +143,3 @@ function haversineMiles(lat1: number, lon1: number, lat2: number, lon2: number):
 function round2(value: number): number {
   return Math.round(value * 100) / 100;
 }
-

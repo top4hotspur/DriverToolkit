@@ -1,5 +1,6 @@
-import { Alert, Text } from "react-native";
+﻿import { Alert, Text } from "react-native";
 import { placeholderAchievements } from "../presentation/placeholderAchievements";
+import { evidenceDetailFromSample, evidenceLabelFromConfidence } from "../utils/format";
 import { Card, ConfidenceBadge, KeyValueRow, PrimaryButton, ScreenShell } from "./ui";
 
 export function AchievementsScreen() {
@@ -22,7 +23,10 @@ export function AchievementsScreen() {
           <KeyValueRow label="Date / Time" value={card.occurredAt} />
           <KeyValueRow label="Context" value={card.areaOrContext} />
           <Text>{card.oneLineExplanation}</Text>
-          <ConfidenceBadge level={card.confidence} sampleSize={card.sampleSize} />
+          <ConfidenceBadge
+            evidenceLabel={evidenceLabelFromConfidence(card.confidence)}
+            evidenceDetail={evidenceDetailFromSample(card.sampleSize, "similar records")}
+          />
           <PrimaryButton label={card.shareCtaLabel} onPress={() => handleShareStub(card.shareText)} />
         </Card>
       ))}

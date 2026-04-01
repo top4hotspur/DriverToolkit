@@ -1,6 +1,6 @@
 ﻿import { Text } from "react-native";
 import { placeholderClaims } from "../presentation/placeholderClaims";
-import { formatGBP } from "../utils/format";
+import { evidenceDetailFromSample, evidenceLabelFromConfidence, formatGBP } from "../utils/format";
 import { Card, ConfidenceBadge, KeyValueRow, ScreenShell } from "./ui";
 
 export function ClaimsFeesScreen() {
@@ -26,7 +26,10 @@ export function ClaimsFeesScreen() {
 
       {placeholderClaims.leaks.map((leak, index) => (
         <Card key={`${leak.type}-${index}`} title={leak.type}>
-          <ConfidenceBadge level={leak.confidence} sampleSize={placeholderClaims.openItems} />
+          <ConfidenceBadge
+            evidenceLabel={evidenceLabelFromConfidence(leak.confidence)}
+            evidenceDetail={evidenceDetailFromSample(placeholderClaims.openItems, "flagged rows")}
+          />
           <Text>{leak.explanation}</Text>
           <Text>{`Claim helper: ${leak.claimHelperText}`}</Text>
           <Text>{`Estimated value: ${formatGBP(leak.estimatedValue)}`}</Text>
@@ -35,4 +38,3 @@ export function ClaimsFeesScreen() {
     </ScreenShell>
   );
 }
-

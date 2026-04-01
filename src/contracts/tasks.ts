@@ -1,13 +1,18 @@
-﻿export type TaskType = "receipt-upload" | "review-flagged-trips" | "expense-admin" | "review-achievements";
+﻿export type TaskType =
+  | "receipt-review"
+  | "review-flagged-trips"
+  | "tax-update"
+  | "review-achievements";
 
 export type TaskPriority = "high" | "medium" | "low";
 
-export interface OfflineTask {
+export interface OfflineAction {
   id: string;
   type: TaskType;
   label: string;
   priority: TaskPriority;
   completed: boolean;
+  actionLabel: string;
   relatedRoute?: string;
+  recurrenceKey?: string;
 }
-

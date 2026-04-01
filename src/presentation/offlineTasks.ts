@@ -1,31 +1,22 @@
-﻿import { OfflineTask } from "../contracts/tasks";
+﻿import { OfflineAction } from "../contracts/tasks";
 
-export function getOfflineTasksPlaceholder(): OfflineTask[] {
-  return [
-    {
-      id: "task-receipts",
-      type: "receipt-upload",
-      label: "Upload this week\'s business receipts",
-      priority: "high",
-      completed: false,
-      relatedRoute: "/reports",
-    },
-    {
-      id: "task-flagged",
-      type: "review-flagged-trips",
-      label: "Review flagged trips from latest import",
-      priority: "medium",
-      completed: false,
-      relatedRoute: "/claims",
-    },
-    {
-      id: "task-achievements",
-      type: "review-achievements",
-      label: "Check new achievements since last upload",
-      priority: "low",
-      completed: false,
-      relatedRoute: "/reports/achievements",
-    },
-  ];
+export type ReceiptActionState = "needs-receipt-now" | "upload-receipt-later" | "no-receipt-available";
+
+export function buildReceiptActionLabel(state: ReceiptActionState): string {
+  switch (state) {
+    case "needs-receipt-now":
+      return "Add receipt now";
+    case "upload-receipt-later":
+      return "Upload receipt later";
+    default:
+      return "No receipt available";
+  }
 }
 
+export function isReceiptActionOutstanding(state: ReceiptActionState): boolean {
+  return state === "needs-receipt-now" || state === "upload-receipt-later";
+}
+
+export function getCaughtUpState(actions: OfflineAction[]): string | null {
+  return actions.length === 0 ? "You're all caught up." : null;
+}

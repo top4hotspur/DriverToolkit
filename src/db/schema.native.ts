@@ -65,6 +65,12 @@ async function runSchemaMigrations(): Promise<void> {
     { name: "file_size_bytes", sqlType: "INTEGER" },
     { name: "sync_state", sqlType: "TEXT DEFAULT 'local-only'" },
   ]);
+
+  await addMissingColumns("app_settings", [
+    { name: "operator_licence_due_date", sqlType: "TEXT" },
+    { name: "training_hours_completed", sqlType: "REAL DEFAULT 0" },
+    { name: "tax_correct_to_date", sqlType: "TEXT" },
+  ]);
 }
 
 async function addMissingColumns(

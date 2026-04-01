@@ -5,6 +5,9 @@ let settings: AppSettingsModel = {
   estimatedTaxLiability: 3800,
   psvDueDate: "2026-05-18",
   insuranceDueDate: "2026-05-03",
+  operatorLicenceDueDate: null,
+  trainingHoursCompleted: 7.25,
+  taxCorrectToDate: "2026-03-30",
   maxStartShiftTravelRadiusMiles: 5,
 };
 
@@ -15,4 +18,3 @@ export async function getAppSettings(): Promise<AppSettingsModel> {
 export async function saveAppSettings(next: AppSettingsModel): Promise<void> {
   settings = next;
 }
-

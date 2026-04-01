@@ -8,6 +8,9 @@ const defaultSettings: AppSettingsModel = {
   estimatedTaxLiability: 3800,
   psvDueDate: "2026-05-18",
   insuranceDueDate: "2026-05-03",
+  operatorLicenceDueDate: null,
+  trainingHoursCompleted: 7.25,
+  taxCorrectToDate: "2026-03-30",
   maxStartShiftTravelRadiusMiles: 5,
 };
 
@@ -20,6 +23,9 @@ export async function getAppSettings(): Promise<AppSettingsModel> {
     estimatedTaxLiability: number;
     psvDueDate: string | null;
     insuranceDueDate: string | null;
+    operatorLicenceDueDate: string | null;
+    trainingHoursCompleted: number;
+    taxCorrectToDate: string | null;
     maxStartShiftTravelRadiusMiles: number;
   }>(`
     SELECT
@@ -27,6 +33,9 @@ export async function getAppSettings(): Promise<AppSettingsModel> {
       estimated_tax_liability as estimatedTaxLiability,
       psv_due_date as psvDueDate,
       insurance_due_date as insuranceDueDate,
+      operator_licence_due_date as operatorLicenceDueDate,
+      training_hours_completed as trainingHoursCompleted,
+      tax_correct_to_date as taxCorrectToDate,
       max_start_shift_travel_radius_miles as maxStartShiftTravelRadiusMiles
     FROM app_settings
     WHERE id = ?
@@ -46,6 +55,9 @@ export async function saveAppSettings(next: AppSettingsModel): Promise<void> {
           estimated_tax_liability = ?,
           psv_due_date = ?,
           insurance_due_date = ?,
+          operator_licence_due_date = ?,
+          training_hours_completed = ?,
+          tax_correct_to_date = ?,
           max_start_shift_travel_radius_miles = ?,
           updated_at = ?
       WHERE id = ?
@@ -55,6 +67,9 @@ export async function saveAppSettings(next: AppSettingsModel): Promise<void> {
       next.estimatedTaxLiability,
       next.psvDueDate,
       next.insuranceDueDate,
+      next.operatorLicenceDueDate,
+      next.trainingHoursCompleted,
+      next.taxCorrectToDate,
       next.maxStartShiftTravelRadiusMiles,
       new Date().toISOString(),
       SETTINGS_ID,
@@ -79,8 +94,10 @@ async function ensureSettingsRow(): Promise<void> {
       INSERT INTO app_settings (
         id, tax_savings_amount, estimated_tax_liability,
         psv_due_date, insurance_due_date,
+        operator_licence_due_date, training_hours_completed,
+        tax_correct_to_date,
         max_start_shift_travel_radius_miles, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `,
     [
       SETTINGS_ID,
@@ -88,9 +105,11 @@ async function ensureSettingsRow(): Promise<void> {
       defaultSettings.estimatedTaxLiability,
       defaultSettings.psvDueDate,
       defaultSettings.insuranceDueDate,
+      defaultSettings.operatorLicenceDueDate,
+      defaultSettings.trainingHoursCompleted,
+      defaultSettings.taxCorrectToDate,
       defaultSettings.maxStartShiftTravelRadiusMiles,
       now,
     ],
   );
 }
-

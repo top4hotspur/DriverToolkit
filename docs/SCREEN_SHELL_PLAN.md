@@ -14,33 +14,35 @@
 
 ## Navigation Rules Implemented
 
-- Bottom nav: Home, Diary, Reports, Claims, Settings.
-- Upload reachable from dashboard and reports CTA buttons (and available via direct route for empty-state hooks).
-- Detailed Analysis is a drill-down from Reports cards using registry IDs.
+- Bottom nav only: Home, Diary, Reports, Claims, Settings.
+- Stray tab routes (`index`, `explore`) removed from tab exposure.
+- Upload reachable from dashboard and reports CTA buttons.
+- Detailed Analysis is a drill-down from Reports cards.
 - Achievements is inside Reports with its own route.
 - Auth sits outside the tab shell.
 
 ## Home Mode Split
 
-- Online mode:
-  - Status pill: `Online - [Area]` with pulse.
-  - GPS business mileage tracking summary.
-  - Historical/context guidance cards only.
-  - No live earnings or live profit statements.
-- Offline mode:
-  - Tax progress block.
-  - Outstanding tasks block.
-  - PSV countdown (6-week warning window).
-  - Insurance countdown (6-week warning window).
-  - `Should I go online now?` action with historical comparative output.
-  - Contextual achievement highlight.
+- Online mode card order:
+  1. Session Status
+  2. Current Location Context
+  3. Recommended Action
+  4. Historical Context Guidance
+  5. Comparable Context Signals
+  6. Business Mileage Tracking
+  7. Quick Actions
+- Offline mode card order:
+  1. Session Status
+  2. Should I go online now?
+  3. Upcoming Warnings
+  4. Outstanding Actions
+  5. Tax Progress
+  6. Achievement Highlight
+  7. Quick Actions
 
 ## Shell Intent Guarantees
 
 - Dashboard remains recommendation-first; no recent-trip feed.
-- Smart Diary remains advisory and historical.
-- Reports leads with intelligence cards after a compact upload/sync status card.
-- Admin/record-keeping appears lower on Reports with local-first receipt records.
-- Detailed Analysis uses correct-to date, basis note, confidence label, actionable insight, IF/THEN, comparison, takeaway.
-- Claims & Fees remains recovery-focused with issue filters and claim-helper text.
-- Achievements remains fun/shareable but grounded in imported-history truth.
+- Online guidance remains historical/comparative; no live earnings claims.
+- Offline mode remains planning/review/admin focused.
+- Settings treats start areas as postcode-first preferred starting points.

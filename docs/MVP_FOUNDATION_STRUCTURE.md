@@ -60,6 +60,14 @@ src/
     settingsTypes.ts
     settingsState.native.ts
     settingsState.ts
+    startPointTypes.ts
+    startPoints.native.ts
+    startPoints.ts
+    offlineActions.native.ts
+    offlineActions.ts
+    targetTypes.ts
+    targetsState.native.ts
+    targetsState.ts
   presentation/
     placeholderData.ts
     placeholderReports.ts
@@ -91,10 +99,3 @@ docs/
   SCREEN_SHELL_PLAN.md
   MVP_SCOPE_BOUNDARY.md
 ```
-
-## Why this structure
-
-- Keeps local schema and domain truth centralized.
-- Uses registry-first contracts for report and achievement identity.
-- Separates session/tracking state from screen composition.
-- Supports local-only import, normalization, and business mileage tracking.

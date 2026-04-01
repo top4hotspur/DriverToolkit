@@ -16,4 +16,3 @@ export interface TrackingStopResult {
   ok: boolean;
   summary: BusinessMileageSummary;
 }
-

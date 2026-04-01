@@ -1,4 +1,4 @@
-import { ReactNode } from "react";
+ï»¿import { ReactNode } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
 export function ScreenShell(props: {
@@ -35,10 +35,14 @@ export function KeyValueRow(props: { label: string; value: string }) {
   );
 }
 
-export function ConfidenceBadge(props: { level: string; sampleSize: number }) {
+export function ConfidenceBadge(props: {
+  evidenceLabel: string;
+  evidenceDetail?: string;
+}) {
   return (
     <View style={styles.badge}>
-      <Text style={styles.badgeText}>{`Confidence ${props.level} · n=${props.sampleSize}`}</Text>
+      <Text style={styles.badgeText}>{props.evidenceLabel}</Text>
+      {props.evidenceDetail ? <Text style={styles.badgeSubText}>{props.evidenceDetail}</Text> : null}
     </View>
   );
 }
@@ -102,15 +106,20 @@ const styles = StyleSheet.create({
   },
   badge: {
     alignSelf: "flex-start",
-    borderRadius: 999,
+    borderRadius: 10,
     backgroundColor: "#d8ede1",
     paddingHorizontal: 10,
-    paddingVertical: 5,
+    paddingVertical: 6,
+    gap: 2,
   },
   badgeText: {
     color: "#21553f",
     fontSize: 12,
-    fontWeight: "600",
+    fontWeight: "700",
+  },
+  badgeSubText: {
+    color: "#2e5f4b",
+    fontSize: 11,
   },
   button: {
     backgroundColor: "#1e6f50",

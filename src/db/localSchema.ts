@@ -15,6 +15,9 @@
     psv_due_date TEXT,
     insurance_due_date TEXT,
     max_start_shift_travel_radius_miles REAL NOT NULL,
+    operator_licence_due_date TEXT,
+    training_hours_completed REAL NOT NULL DEFAULT 0,
+    tax_correct_to_date TEXT,
     updated_at TEXT NOT NULL
   );`,
   `CREATE TABLE IF NOT EXISTS session_state (
@@ -35,6 +38,11 @@
     total_miles REAL NOT NULL,
     is_active INTEGER NOT NULL,
     created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );`,
+  `CREATE TABLE IF NOT EXISTS task_states (
+    id TEXT PRIMARY KEY NOT NULL,
+    completed_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
   );`,
   `CREATE TABLE IF NOT EXISTS provider_imports (
@@ -224,4 +232,3 @@ export function getLocalSchemaSql(): string {
 export function getLocalSchemaStatements(): string[] {
   return [...schemaStatements];
 }
-

@@ -1,4 +1,4 @@
-import { Link, useRouter } from "expo-router";
+ï»¿import { Link, useRouter } from "expo-router";
 import { Text, View } from "react-native";
 import { getReportRoute } from "../contracts/reportRegistry";
 import {
@@ -6,6 +6,7 @@ import {
   placeholderReportsAdminSection,
   placeholderReportsUploadStatus,
 } from "../presentation/placeholderReports";
+import { evidenceDetailFromSample, evidenceLabelFromConfidence, formatGBP } from "../utils/format";
 import { Card, ConfidenceBadge, KeyValueRow, PrimaryButton, ScreenShell } from "./ui";
 
 export function ReportsScreen() {
@@ -43,7 +44,10 @@ export function ReportsScreen() {
                 <Text>{report.summary}</Text>
                 <Text>{report.insightNudge}</Text>
                 <KeyValueRow label="Basis" value={report.basisWindow.label} />
-                <ConfidenceBadge level={report.confidence} sampleSize={report.sampleSize} />
+                <ConfidenceBadge
+                  evidenceLabel={evidenceLabelFromConfidence(report.confidence)}
+                  evidenceDetail={evidenceDetailFromSample(report.sampleSize, "comparable periods")}
+                />
               </Card>
             </View>
           </Link>
@@ -56,7 +60,7 @@ export function ReportsScreen() {
         {placeholderReportsAdminSection.records.map((record) => (
           <View key={record.id} style={{ marginTop: 8 }}>
             <Text>{`${record.title} (${record.syncState})`}</Text>
-            <Text>{record.amount !== null ? `£${record.amount.toFixed(2)}` : "No amount"}</Text>
+            <Text>{record.amount !== null ? formatGBP(record.amount) : "No amount"}</Text>
             {record.receipt ? (
               <Text>{`Receipt: ${record.receipt.receiptSourceType} - ${record.receipt.mimeType}`}</Text>
             ) : (
@@ -68,3 +72,4 @@ export function ReportsScreen() {
     </ScreenShell>
   );
 }
+
