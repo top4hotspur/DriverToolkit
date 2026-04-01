@@ -1,0 +1,706 @@
+Absolutely. Here’s the tight spec we should lock before Codex touches more of the build.
+
+# Driver Toolkit — App Architecture & Report Design Spec
+
+## 1. Product summary
+
+Driver Toolkit is a **local-first decision-support app for rideshare drivers** built from:
+
+* delayed privacy-export trip history
+* local cost settings and targets
+* lightweight diary/event context
+
+It is **not** a live earnings tracker.
+It is **not** a realtime dispatch mirror.
+It is **not** a fleet-density or “where all drivers are” app.
+
+The dashboard should feel active in-shift, but the intelligence is historical and explainable. That matches the current dashboard reference, which leads with “Evaluating Context,” a recommended action, confidence, rationale, and a min-accept grid rather than live operational data. 
+
+## 2. Core app structure
+
+The app should have 8 primary surfaces.
+
+### 1. Dashboard
+
+Purpose: the co-pilot screen for live shift decisions.
+
+This is the strongest reference screen and should stay close to the current mocked shape:
+
+* evaluating context state
+* recommended action
+* confidence badge
+* sample grounding
+* opportunity nudge
+* low-value / min-accept area table 
+
+### 2. Smart Diary
+
+Purpose: planned schedule and opportunity guidance.
+
+This should remain timeline-based and advisory:
+
+* event/time window
+* place
+* what is happening
+* whether it is historically worth repositioning
+* confidence tone, not certainty 
+
+### 3. Reports
+
+Purpose: the intelligence hub for browsing and learning from imported history.
+
+This is where drivers can sit parked up and explore:
+
+* where they do well
+* where they leak money
+* what trips are deceptive
+* how areas compare
+* what patterns are changing
+
+The current reports screen has the right seed but needs to become more intelligence-first. 
+
+### 4. Detailed Analysis
+
+Purpose: drill into one report and turn findings into action rules.
+
+This should keep the current IF/THEN framing, basis-window note, and “what to do” summary. 
+
+### 5. Claims & Fees
+
+Purpose: recovery engine surface for missed money.
+
+This should stay focused on:
+
+* what likely went wrong
+* how much is missing
+* which trip it refers to
+* copy/share/claim helper actions 
+
+### 6. Upload
+
+Purpose: explain why the privacy export matters and let the driver upload it.
+
+This screen must always preserve both:
+
+* why upload matters
+* how to get the file
+
+The current version gets that right. 
+
+### 7. Settings
+
+Purpose: control panel for the decision engine.
+
+This is where users manage:
+
+* targets
+* saved start areas
+* vehicle costs
+* assumptions used by reports and recommendations
+
+The current settings mock is directionally right. 
+
+### 8. Achievements
+
+Purpose: emotional, shareable highlights from imported history.
+
+This is new and should sit alongside Reports, not replace it.
+
+It should let drivers browse their:
+
+* best
+* worst
+* funniest / most painful
+* most brag-worthy
+  records, and share them easily to WhatsApp.
+
+## 3. Navigation architecture
+
+Recommended bottom-nav structure:
+
+* Home
+* Diary
+* Reports
+* Claims
+* Settings
+
+Upload should be reachable from:
+
+* Reports header card
+* empty-state prompts
+* first-run flow
+
+Achievements should live under:
+
+* Reports as a top report card
+* and optionally as its own standout card/tab later if engagement is strong
+
+Detailed Analysis is not a bottom tab. It is a drill-down from Reports.
+
+Auth sits outside the main app shell. 
+
+## 4. Engine architecture
+
+The product should still be built around the 4 engines already agreed in the backend foundation plan:
+
+* Import Engine
+* Truth Engine
+* Decision Engine
+* Recovery Engine 
+
+### Import Engine
+
+Handles:
+
+* ZIP or CSV intake
+* provider detection
+* parsing
+* normalization
+* insertion into local tables
+
+### Truth Engine
+
+Builds canonical metrics once from normalized trips and local settings.
+
+### Decision Engine
+
+Produces:
+
+* dashboard recommendation
+* bad-bet thresholds
+* have-I-been-here-before outputs
+* what-usually-happens-next outputs
+* start-area comparisons
+* report summaries
+
+### Recovery Engine
+
+Produces:
+
+* earnings leaks
+* missed surcharge detection
+* wait-time anomaly detection
+* underpayment helpers
+
+## 5. Data architecture
+
+The local-first table direction remains:
+
+* users_local
+* provider_imports
+* trips_raw
+* trips_normalized
+* expenses
+* vehicle_cost_history
+* decision_targets
+* start_areas
+* geofences
+* diary_events_cached
+* recommendation_snapshots
+* earnings_leaks 
+
+### Important rule
+
+Every screen must derive from the same canonical truth model:
+
+* earnings_total
+* waiting_time_minutes
+* trip_distance_miles
+* dead_miles
+* fuel_cost
+* maintenance_cost
+* true_net
+* true_net_per_hour
+* true_net_per_mile
+* return_trip_penalty
+* target_gap_hourly
+* target_gap_mile 
+
+That means Reports and Achievements must not invent their own financial logic.
+
+## 6. Locked screen purpose definitions
+
+## Dashboard
+
+This is not a dashboard in the BI sense. It is a **decision assistant**.
+
+Primary content blocks:
+
+* Recommended Action
+* Why this recommendation
+* Opportunity Nudge
+* Low-Value / Min-Accept table
+
+Optional later drill-down:
+
+* View similar trips
+* Why this recommendation
+
+Avoid:
+
+* recent activity feed
+* recent trip list as a main feature
+* live earnings counters
+* chart-heavy clutter
+
+The current HTML already shows the right hierarchy. 
+
+## Smart Diary
+
+This should be a **historical + event-informed schedule advisor**.
+
+Primary content blocks:
+
+* event/time card
+* location
+* what’s happening
+* whether it usually pays for this driver
+* compact rationale
+
+Avoid:
+
+* pretending the event guarantees demand
+* overconfidence language
+
+The current mock nails the tone. 
+
+## Upload
+
+This page must keep two jobs:
+
+### Explain why upload matters
+
+It powers:
+
+* wait estimates
+* low-value area warnings
+* start-area comparisons
+* journey regret
+* earnings leaks
+* 90-minute outcome intelligence
+
+### Explain how to get the file
+
+The current 4-step instruction structure is good. 
+
+## Settings
+
+This must be framed as:
+
+* decision targets
+* saved start areas
+* vehicle assumptions
+
+And not just generic profile/settings.
+
+Required settings blocks:
+
+* target £/hour
+* target £/mile
+* MPG
+* fuel price
+* maintenance assumption
+* saved start areas with preview stats
+
+The current mock already moves in this direction. 
+
+## Claims & Fees
+
+This is a focused recovery page:
+
+* totals identified
+* filter chips
+* card list of likely issues
+* copy/share helper CTA
+
+That current direction is good and should stay narrow. 
+
+## 7. Reports architecture
+
+Reports should become the “browse and learn” engine of the product.
+
+### Reports page role
+
+The top-level Reports page should act like a launcher of report cards, not a giant mixed admin surface.
+
+The top section should lead with tappable cards like:
+
+* Journey Regret
+* Area Performance
+* £/Hour vs £/Mile
+* Best Start Areas
+* Dead Mile Traps
+* Queue Traps
+* Follow-On Strength
+* Earnings Leaks
+* Achievements
+
+The current reports mock already has the beginnings of this card-led direction. 
+
+### Admin content
+
+Things like:
+
+* pending admin
+* expense/tax logs
+* record-keeping
+
+can still exist, but should sit lower on the page and not dominate the identity of Reports. That is already one of the main issues in the current mock. 
+
+## 8. Detailed reports catalogue
+
+Here is the report catalogue I would lock for MVP + near-MVP.
+
+### A. Journey Regret
+
+Question answered:
+
+* What trips looked good gross but were poor value after costs and time?
+
+Core fields:
+
+* area or route pattern
+* price band
+* underperformance rate
+* true net/hour
+* return penalty
+* common trigger
+* suggested threshold rule
+
+Example output:
+
+* “Trips to BT36 under £18 underperform 71% of the time.”
+
+### B. Area Performance
+
+Question answered:
+
+* Which areas actually work for me?
+
+Core fields:
+
+* avg wait
+* avg first fare
+* 90-minute outcome
+* true net/hour
+* true net/mile
+* min accept fare
+* confidence/sample size
+
+This fits the current detailed-analysis template extremely well. 
+
+### C. £/Hour vs £/Mile
+
+Question answered:
+
+* Which trips/areas look fine hourly but fail on mileage, or vice versa?
+
+Core fields:
+
+* area
+* true net/hour
+* true net/mile
+* rank difference
+* cost sensitivity
+
+### D. Best Start Areas
+
+Question answered:
+
+* Where should I start by day/time?
+
+Core fields:
+
+* saved start area
+* avg wait
+* first job
+* 90-minute outcome
+* true net/hour
+* best time window
+* confidence
+
+This is already hinted at in Settings and Detailed Analysis.
+
+### E. Dead Mile Traps
+
+Question answered:
+
+* Where do I get stranded into poor unpaid return miles?
+
+Core fields:
+
+* destination area
+* dead-mile tendency
+* return-to-core penalty
+* under-target frequency
+* min accept threshold
+
+### F. Queue Traps
+
+Question answered:
+
+* Which queues feel attractive but underperform?
+
+Core fields:
+
+* queue area
+* avg queue wait
+* avg first fare
+* 90-minute outcome
+* true net/hour
+* recommendation rule
+
+This especially suits airport analysis.
+
+### G. Follow-On Strength
+
+Question answered:
+
+* If I go here, how likely am I to get something useful next?
+
+Core fields:
+
+* area
+* follow-on probability
+* avg wait to next fare
+* next 60/90-minute yield
+* confidence
+
+### H. Earnings Leaks
+
+Question answered:
+
+* Where is money likely missing from my imported history?
+
+Core fields:
+
+* leak type
+* estimated value
+* reason
+* confidence
+* claim helper
+
+### I. Tip Patterns
+
+Question answered:
+
+* Where and when do tips actually happen?
+
+Core fields:
+
+* best tipping time buckets
+* best tipping areas
+* tip per trip
+* tip per mile
+* tip per hour
+
+### J. Time-of-Day Winners / Losers
+
+Question answered:
+
+* Which time blocks work best and worst for me?
+
+Core fields:
+
+* day/time bucket
+* true net/hour
+* true net/mile
+* regret rate
+* confidence
+
+### K. Achievements
+
+Question answered:
+
+* What are my best and worst records from my imported history?
+
+This is the emotional/shareable report.
+
+## 9. Achievements page spec
+
+This should be a dedicated screen or strong report drill-down.
+
+### Purpose
+
+* make the history fun to browse
+* make good and bad records memorable
+* create easy sharing hooks
+* drive WhatsApp sharing and word-of-mouth
+
+### Core categories
+
+* Best trip by £/hour
+* Worst trip by £/hour
+* Best trip by £/mile
+* Worst trip by £/mile
+* Best tip
+* Worst tip
+* Best tip per mile
+* Worst tip per mile
+* Best tip per hour
+* Worst tip per hour
+
+### Nice additions later
+
+* Longest dead-mile sting
+* Best 90-minute block
+* Worst queue decision
+* Most painful regret trip
+* Biggest comeback day
+* Highest earning hour block
+
+### Card shape
+
+Each achievement card should include:
+
+* title
+* metric value
+* date/time
+* area or trip context
+* one-line explanation
+* share CTA
+
+### Share behaviour
+
+Primary share action:
+
+* WhatsApp
+
+Suggested share tone:
+
+* light
+* brag/banter friendly
+* still tied to real data
+
+Examples:
+
+* “Best £/hr trip from my Uber history: £42.80/hr”
+* “Worst value trip: airport queue disaster 😅”
+* “Biggest tip on one trip: £11.40”
+
+### Guardrail
+
+Achievements must still be clearly based on imported historical data, not live activity.
+
+## 10. Report detail page design rules
+
+The current detailed-report mock is strong and should become the reusable drill-down template. It already shows:
+
+* basis window note
+* actionable insight block
+* compact comparison table
+* what to do summary 
+
+Standard detail-page sections should be:
+
+1. Header
+
+* report name
+* “correct to” date
+* basis window
+
+2. Actionable Insights
+
+* IF / THEN rules
+* confidence label
+
+3. Main comparison table
+
+* compact, readable
+* one key metric mode at a time
+
+4. Summary block
+
+* what to do
+* best default
+* worst trap
+* plain-English conclusion
+
+5. Optional toggle
+
+* £/hour
+* £/mile
+* 90-minute outcome
+
+## 11. Decision logic mapping
+
+To keep this tight, each major product question maps to one screen family.
+
+### Should I stay / reposition?
+
+Dashboard + Smart Diary
+
+### What usually happens here?
+
+Dashboard + Area Performance + Start Area reports
+
+### What usually happens next?
+
+Dashboard drill-down + Follow-On Strength report
+
+### What is a bad bet?
+
+Dashboard min-accept grid + Bad Bet / Queue Trap / Dead Mile Trap reports
+
+### What looked good but was actually poor value?
+
+Journey Regret + Achievements worst cards
+
+### What money might I be owed?
+
+Claims & Fees / Earnings Leaks
+
+## 12. MVP vs later
+
+### MVP
+
+* Dashboard
+* Smart Diary
+* Upload
+* Settings
+* Reports launcher
+* 4–6 report types
+* Detailed Analysis template
+* Claims & Fees
+* Achievements basic version
+
+### Later
+
+* richer achievements
+* more advanced sharing
+* more drill-down toggles
+* pooled intelligence
+* subscriptions/auth polish
+* remote diary feed refinements
+
+## 13. Codex guardrails
+
+Codex should not:
+
+* invent new product direction
+* add live earnings tracking
+* add recent-trip feeds as a core UX
+* turn Reports into admin-first
+* make Achievements a gimmick detached from the truth model
+* add expensive backend-heavy infra
+
+Codex should:
+
+* preserve the current dashboard tone and layout hierarchy 
+* preserve the upload explanation structure 
+* preserve the settings-as-control-panel direction 
+* preserve the detailed analysis IF/THEN framing 
+* evolve Reports into an intelligence hub using tappable cards 
+
+# What I’d do next
+
+Next I should turn this into a **single Codex brief** that includes:
+
+* locked product definition
+* page architecture
+* report catalogue
+* achievements requirements
+* exact implementation order
+* explicit “do not drift” rules
+
+That is the right thing to hand to Codex before the next build pass.

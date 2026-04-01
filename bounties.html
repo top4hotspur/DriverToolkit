@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Driver Toolkit - Claims</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-900 text-slate-100 font-sans antialiased pb-28">
+
+    <header class="pt-12 pb-4 bg-slate-900 border-b border-slate-800 px-6 sticky top-0 z-50">
+        <div>
+            <h1 class="text-2xl font-bold text-white tracking-tight">Claims & Fees</h1>
+            <p class="text-slate-400 text-xs mt-1">Identified from imported trip data</p>
+        </div>
+    </header>
+
+    <main class="px-6 mt-6 flex-1">
+
+        <div class="bg-gradient-to-br from-indigo-900 to-slate-800 rounded-3xl p-6 border border-indigo-500/40 shadow-lg mb-4">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-indigo-300 text-[10px] font-black uppercase tracking-widest">Total Identified</h2>
+            </div>
+            <div class="flex items-baseline space-x-2">
+                <span class="text-5xl font-black text-white">£15.00</span>
+                <span class="text-indigo-300 text-sm font-bold">/ 3 Trips</span>
+            </div>
+        </div>
+
+        <div class="flex space-x-2 overflow-x-auto no-scrollbar mb-6 pb-1">
+            <button class="bg-slate-700 text-white text-[11px] font-bold px-4 py-2 rounded-full border border-slate-600 whitespace-nowrap">Surcharges (3)</button>
+            <button class="bg-slate-800 text-slate-400 text-[11px] font-bold px-4 py-2 rounded-full border border-slate-700 whitespace-nowrap">Wait Time</button>
+            <button class="bg-slate-800 text-slate-400 text-[11px] font-bold px-4 py-2 rounded-full border border-slate-700 whitespace-nowrap">Underpaid</button>
+            <button class="bg-slate-800 text-slate-400 text-[11px] font-bold px-4 py-2 rounded-full border border-slate-700 whitespace-nowrap">Recovered</button>
+        </div>
+
+        <div class="space-y-4">
+            <div class="bg-slate-800 rounded-2xl border border-slate-700 shadow-lg overflow-hidden">
+                <div class="bg-slate-900/50 p-3 border-b border-slate-700 flex justify-between items-center">
+                    <div class="flex items-center space-x-2 text-[10px] font-bold text-slate-400">
+                        <span>24 Mar 2026</span><span>•</span><span>14:32</span>
+                    </div>
+                    <span class="text-amber-400 text-[10px] font-bold uppercase tracking-wider bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">Missing £5.00</span>
+                </div>
+                <div class="p-4">
+                    <h3 class="font-bold text-white text-sm mb-1">BFS Airport Drop-off</h3>
+                    <div class="flex items-center text-[10px] text-slate-500 font-mono mb-4 bg-slate-900 p-2 rounded-lg border border-slate-800">
+                        <span class="mr-2">Platform ID:</span>
+                        <span class="text-slate-300">8f7d-4b2a-9c1e-55x2</span>
+                    </div>
+                    <div class="flex space-x-2">
+                        <button class="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] font-bold py-2.5 rounded-xl transition">
+                            COPY MESSAGE
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+</body>
+</html>

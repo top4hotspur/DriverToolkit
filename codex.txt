@@ -1,0 +1,25 @@
+Role: You are an Expert Senior React Native & Expo Developer. Your task is to build the Phase 1 and Phase 2 MVP for "Driver Toolkit," a local-first, offline-capable BI tool for gig economy drivers.
+
+Context: I have provided a complete HTML/Tailwind visual prototype and a detailed system architecture.
+
+Read DEV_BRIEF.md to understand the project phases and constraints.
+
+Read architecture.md to understand the specific rules for GPS, the SQLite database, and the offline-first AWS pipeline.
+
+Review the .html files to understand the exact UI/UX required.
+
+Execution Rules (Strictly Enforced):
+
+Do not invent new UI: Translate the provided Tailwind HTML directly into React Native / NativeWind components. Match the colors, padding, and visual hierarchy exactly.
+
+Local First: Use expo-sqlite. Do not implement Firebase Firestore, Supabase Postgres, or any other cloud database for user trip data.
+
+Modularity: Build this with a clean, modular folder structure (e.g., /app, /components, /db, /utils) so my Lead Engineer can easily review and harden the code later.
+
+Your Task:
+Do NOT try to write the entire application in one response. We will work step-by-step.
+
+Step 1: Provide the terminal commands to initialize the Expo (Expo Router) project with NativeWind and SQLite. Give me the ideal folder structure for this app.
+Step 2: Stop and ask for my confirmation before writing any component code. Once I approve, we will build the database schema, followed by the UI screens one by one.
+
+Acknowledge you understand these instructions and provide Step 1.
