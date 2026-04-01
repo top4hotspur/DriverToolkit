@@ -24,6 +24,7 @@ export async function evaluateShouldGoOnlineNow(args: {
 
     const position = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
     const nearby = args.startPoints
+      .filter((point) => Number.isFinite(point.latitude) && Number.isFinite(point.longitude))
       .map((point) => ({
         point,
         distanceMiles: haversineMiles(

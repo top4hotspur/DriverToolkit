@@ -1,4 +1,5 @@
-﻿import { useRouter } from "expo-router";
+import * as Location from "expo-location";
+import { useRouter } from "expo-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Animated, Pressable, StyleSheet, Text, View } from "react-native";
 import { GoOnlineNowDecisionContract } from "../contracts/goOnlineNow";
@@ -22,7 +23,7 @@ import { getOfflineContextualAchievementHighlight } from "../presentation/placeh
 import { getCaughtUpState } from "../presentation/offlineTasks";
 import { completeOutstandingAction, getOutstandingActions } from "../state/offlineActions";
 import { getAppSettings } from "../state/settingsState";
-import { getSessionState, setSessionMode } from "../state/sessionState";
+import { getSessionState, setCurrentAreaLabel, setSessionMode } from "../state/sessionState";
 import { SessionStateModel } from "../state/sessionTypes";
 import { listStartPoints } from "../state/startPoints";
 import { StartPoint } from "../state/startPointTypes";
@@ -62,6 +63,7 @@ export function DashboardScreen() {
   const [outstandingActions, setOutstandingActions] = useState<OfflineAction[]>([]);
   const [latestImportToken, setLatestImportToken] = useState<string | null>(null);
   const [newAchievementResult, setNewAchievementResult] = useState(() => detectNewAchievementsAfterImport(0));
+  const [actionMessage, setActionMessage] = useState<string | null>(null);
 
   const dueWarnings = useMemo(() => {
     const warnings: string[] = [];
@@ -116,15 +118,22 @@ export function DashboardScreen() {
       setSettings(null);
       setStartPoints([]);
       setOutstandingActions([]);
+      setActionMessage("We couldn't load your dashboard context. Try reopening the app.");
     });
 
     const interval = setInterval(() => {
-      getBusinessMileageSummary().then((next) => {
-        if (mounted) {
-          setMileageSummary(next);
-        }
-      });
-    }, 15_000);
+      getBusinessMileageSummary()
+        .then((next) => {
+          if (mounted) {
+            setMileageSummary(next);
+          }
+        })
+        .catch(() => {
+          if (mounted) {
+            setActionMessage("Mileage tracking summary is temporarily unavailable.");
+          }
+        });
+    }, 10_000);
 
     return () => {
       mounted = false;
@@ -153,30 +162,58 @@ export function DashboardScreen() {
   }, [pulse, session.mode]);
 
   useEffect(() => {
-    if (session.mode !== "online" || mileageSummary.active) {
+    if (session.mode !== "online") {
       return;
     }
 
-    startBusinessMileageTracking(session.currentAreaLabel)
-      .then((tracking) => setMileageSummary(tracking.summary))
-      .catch(() => {
-        // Safe fallback: keep UI responsive.
-      });
-  }, [mileageSummary.active, session.currentAreaLabel, session.mode]);
+    let active = true;
 
-  useEffect(() => {
-    if (session.mode !== "offline" || !mileageSummary.active) {
-      return;
-    }
+    const refreshAreaLabel = async () => {
+      try {
+        const permission = await Location.getForegroundPermissionsAsync();
+        if (permission.status !== "granted") {
+          const requested = await Location.requestForegroundPermissionsAsync();
+          if (requested.status !== "granted") {
+            if (active) {
+              setActionMessage("Location permission is needed for live area labels while online.");
+            }
+            return;
+          }
+        }
 
-    stopBusinessMileageTracking(session.currentAreaLabel)
-      .then((tracking) => setMileageSummary(tracking.summary))
-      .catch(() => {
-        // Safe fallback: keep UI responsive.
-      });
-  }, [mileageSummary.active, session.currentAreaLabel, session.mode]);
+        const position = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+        const label = await deriveAreaLabel(position.coords.latitude, position.coords.longitude);
+
+        if (!active || !label) {
+          return;
+        }
+
+        if (label !== session.currentAreaLabel) {
+          await setCurrentAreaLabel(label);
+          if (!active) {
+            return;
+          }
+          setSession((prev) => ({ ...prev, currentAreaLabel: label }));
+        }
+      } catch {
+        if (active) {
+          setActionMessage("We couldn't refresh your live area just now.");
+        }
+      }
+    };
+
+    refreshAreaLabel();
+    const interval = setInterval(refreshAreaLabel, 60_000);
+
+    return () => {
+      active = false;
+      clearInterval(interval);
+    };
+  }, [session.currentAreaLabel, session.mode]);
 
   const onToggleSession = async () => {
+    setActionMessage(null);
+
     if (session.mode === "offline") {
       if (startPoints.length === 0) {
         setGoOnlineDecision({
@@ -191,22 +228,36 @@ export function DashboardScreen() {
           fallbackMessage: "Add at least one preferred starting point in Settings first.",
         });
       }
+
       const chosenArea = startPoints[0]?.postcode ?? session.currentAreaLabel ?? null;
-      const tracking = await startBusinessMileageTracking(chosenArea);
-      const next = await setSessionMode("online", chosenArea);
-      setSession(next);
-      setMileageSummary(tracking.summary);
+      try {
+        const next = await setSessionMode("online", chosenArea);
+        setSession(next);
+
+        const tracking = await startBusinessMileageTracking(chosenArea);
+        setMileageSummary(tracking.summary);
+        if (!tracking.ok && tracking.warning) {
+          setActionMessage(tracking.warning);
+        }
+      } catch {
+        setActionMessage("Couldn't go online right now. Please try again.");
+      }
       return;
     }
 
-    const tracking = await stopBusinessMileageTracking(session.currentAreaLabel);
-    const next = await setSessionMode("offline", session.currentAreaLabel);
-    setSession(next);
-    setMileageSummary(tracking.summary);
-    setGoOnlineDecision(null);
+    try {
+      const tracking = await stopBusinessMileageTracking(session.currentAreaLabel);
+      const next = await setSessionMode("offline", session.currentAreaLabel);
+      setSession(next);
+      setMileageSummary(tracking.summary);
+      setGoOnlineDecision(null);
+    } catch {
+      setActionMessage("Couldn't switch offline right now. Please try again.");
+    }
   };
 
   const onShouldGoOnlineNow = async () => {
+    setActionMessage(null);
     try {
       const decision = await evaluateShouldGoOnlineNow({
         maxRadiusMiles: settings?.maxStartShiftTravelRadiusMiles ?? null,
@@ -229,12 +280,16 @@ export function DashboardScreen() {
   };
 
   const onCompleteAction = async (actionId: string) => {
-    await completeOutstandingAction(actionId);
-    const refreshed = await getOutstandingActions({
-      hasNewAchievements: newAchievementResult.hasNewAchievements,
-      latestImportToken,
-    });
-    setOutstandingActions(refreshed);
+    try {
+      await completeOutstandingAction(actionId);
+      const refreshed = await getOutstandingActions({
+        hasNewAchievements: newAchievementResult.hasNewAchievements,
+        latestImportToken,
+      });
+      setOutstandingActions(refreshed);
+    } catch {
+      setActionMessage("Couldn't update this action right now.");
+    }
   };
 
   const rec = placeholderDashboard.recommendation;
@@ -261,11 +316,13 @@ export function DashboardScreen() {
     setupReminders.push("Add your operator licence expiry date in Settings.");
   }
 
+  const userFacingAction = mapDecisionLabel(rec.action);
+
   return (
     <ScreenShell
       title="Dashboard"
       subtitle="Decision-first co-pilot built on imported history and local controls."
-      footerCta={<PrimaryButton label="Upload privacy file" onPress={() => router.push("/upload")} />}
+      footerCta={session.mode === "offline" ? <PrimaryButton label="Upload privacy file" onPress={() => router.push("/upload")} /> : undefined}
     >
       <Card title="Session Status">
         <Pressable onPress={onToggleSession} style={[styles.statusPill, session.mode === "online" ? styles.onlinePill : styles.offlinePill]}>
@@ -282,15 +339,10 @@ export function DashboardScreen() {
           ) : (
             <View style={styles.offlineDot} />
           )}
-          <Text style={styles.statusText}>
-            {session.mode === "online"
-              ? `Online - ${session.currentAreaLabel ?? startPoints[0]?.postcode ?? "BT1"}`
-              : session.currentAreaLabel
-                ? `Offline - ${session.currentAreaLabel}`
-                : "Offline"}
-          </Text>
+          <Text style={styles.statusText}>{session.mode === "online" ? `Online - ${session.currentAreaLabel ?? "Locating area"}` : "Offline"}</Text>
         </Pressable>
         <Text style={styles.statusHint}>{session.mode === "online" ? "Tap to go offline" : "Tap to go online"}</Text>
+        {actionMessage ? <Text style={styles.statusMessage}>{actionMessage}</Text> : null}
       </Card>
 
       {session.mode === "online" ? (
@@ -298,29 +350,21 @@ export function DashboardScreen() {
           <Card title="Current Location Context">
             <Text>
               {session.currentAreaLabel
-                ? `${session.currentAreaLabel} is currently the active start context.`
-                : "Location context is available after choosing a preferred start point."}
+                ? `${session.currentAreaLabel} is your live working area label.`
+                : "Location is available while online once GPS resolves your current area."}
             </Text>
           </Card>
 
           <Card title="Recommended Action">
-            <Text style={{ fontWeight: "700", fontSize: 20, textTransform: "capitalize" }}>{rec.action}</Text>
+            <Text style={styles.decisionHeadline}>{userFacingAction}</Text>
             <ConfidenceBadge
               evidenceLabel={evidenceLabelFromConfidence(rec.confidence)}
-              evidenceDetail={evidenceDetailFromSample(rec.sampleSize, "comparable starts")}
+              evidenceDetail={evidenceDetailFromSample(rec.sampleSize, "similar periods")}
             />
-            <Text>{rec.rationale}</Text>
             <Text>{`Basis: ${rec.basisWindow.label}`}</Text>
-          </Card>
-
-          <Card title="Historical Context Guidance">
-            <Text>
-              This area is usually <Text style={styles.keyTermWeak}>weaker</Text> for this time.
-            </Text>
+            <Text>{placeholderOnlineGuidance.areaStrength}</Text>
             <Text>{placeholderOnlineGuidance.shiftHint}</Text>
-            <Text>
-              Nearby options in your radius may be <Text style={styles.keyTermStrong}>stronger</Text>, especially BT7.
-            </Text>
+            <Text>{placeholderOnlineGuidance.nearbyAlternative}</Text>
           </Card>
 
           <Card title="What Usually Happens Here?">
@@ -341,9 +385,10 @@ export function DashboardScreen() {
           </Card>
 
           <Card title="Quick Actions">
-            <PrimaryButton label="Upload expense" onPress={() => router.push("/reports")} />
-            <PrimaryButton label="Add cash expense" onPress={() => router.push("/reports")} />
-            <PrimaryButton label="Upload privacy file" onPress={() => router.push("/upload")} />
+            <View style={styles.quickActionsRow}>
+              <PrimaryButton label="Upload expense" onPress={() => router.push("/reports")} />
+              <PrimaryButton label="Add cash expense" onPress={() => router.push("/reports")} />
+            </View>
           </Card>
         </>
       ) : (
@@ -355,13 +400,8 @@ export function DashboardScreen() {
               <View style={{ marginTop: 8, gap: 4 }}>
                 <Text style={{ fontWeight: "700" }}>{goOnlineDecision.headline}</Text>
                 <Text>{goOnlineDecision.rationale}</Text>
-                {goOnlineDecision.state === "decision" ? (
-                  <Text>{goOnlineDecision.userFacingDecisionLabel}</Text>
-                ) : null}
-                <ConfidenceBadge
-                  evidenceLabel={goOnlineDecision.evidenceLabel}
-                  evidenceDetail={goOnlineDecision.evidenceDetail}
-                />
+                {goOnlineDecision.state === "decision" ? <Text>{goOnlineDecision.userFacingDecisionLabel}</Text> : null}
+                <ConfidenceBadge evidenceLabel={goOnlineDecision.evidenceLabel} evidenceDetail={goOnlineDecision.evidenceDetail} />
                 {goOnlineDecision.comparedAreaLabel ? (
                   <Text>{`Alternative: ${goOnlineDecision.comparedAreaLabel} (${goOnlineDecision.comparedAreaDistanceMiles?.toFixed(1)} miles)`}</Text>
                 ) : null}
@@ -369,7 +409,7 @@ export function DashboardScreen() {
             ) : null}
           </Card>
 
-          {(upcomingWarnings.length > 0 || setupReminders.length > 0) ? (
+          {upcomingWarnings.length > 0 || setupReminders.length > 0 ? (
             <Card title="Upcoming Warnings">
               {upcomingWarnings.map((warning, index) => (
                 <Text key={`warn-${index}`}>{warning}</Text>
@@ -394,7 +434,7 @@ export function DashboardScreen() {
             ))}
             {getCaughtUpState(outstandingActions) ? (
               <View style={{ gap: 8 }}>
-                <Text>{getCaughtUpState(outstandingActions)}</Text>
+                <Text>You're all caught up!</Text>
                 <PrimaryButton label="Upload privacy file" onPress={() => router.push("/upload")} />
               </View>
             ) : null}
@@ -412,20 +452,61 @@ export function DashboardScreen() {
             <Text>{offlineHighlight.metricValue}</Text>
             <Text>{`When: ${offlineHighlight.occurredAt}`}</Text>
             <Text>{offlineHighlight.oneLineExplanation}</Text>
-            {newAchievementResult.hasNewAchievements ? (
-              <Text>{`New since upload: ${newAchievementResult.events[0].headline}`}</Text>
-            ) : null}
+            {newAchievementResult.hasNewAchievements ? <Text>{`New since upload: ${newAchievementResult.events[0].headline}`}</Text> : null}
           </Card>
 
           <Card title="Quick Actions">
-            <PrimaryButton label="Upload expense" onPress={() => router.push("/reports")} />
-            <PrimaryButton label="Add cash expense" onPress={() => router.push("/reports")} />
-            <PrimaryButton label="Upload privacy file" onPress={() => router.push("/upload")} />
+            <View style={styles.quickActionsRow}>
+              <PrimaryButton label="Upload expense" onPress={() => router.push("/reports")} />
+              <PrimaryButton label="Add cash expense" onPress={() => router.push("/reports")} />
+              <PrimaryButton label="Upload privacy file" onPress={() => router.push("/upload")} />
+            </View>
           </Card>
         </>
       )}
     </ScreenShell>
   );
+}
+
+async function deriveAreaLabel(latitude: number, longitude: number): Promise<string | null> {
+  try {
+    const results = await Location.reverseGeocodeAsync({ latitude, longitude });
+    const first = results[0];
+
+    if (!first) {
+      return null;
+    }
+
+    const outward = first.postalCode?.trim().split(" ")[0]?.toUpperCase();
+    if (outward) {
+      return outward;
+    }
+
+    if (first.city) {
+      return first.city;
+    }
+
+    if (first.subregion) {
+      return first.subregion;
+    }
+
+    return "Area available";
+  } catch {
+    return null;
+  }
+}
+
+function mapDecisionLabel(action: "stay" | "reposition" | "avoid" | "short-wait-only"): string {
+  if (action === "stay") {
+    return "Stay here";
+  }
+  if (action === "reposition") {
+    return "Reposition";
+  }
+  if (action === "avoid") {
+    return "Work, but not here";
+  }
+  return "Short wait only";
 }
 
 const styles = StyleSheet.create({
@@ -464,12 +545,17 @@ const styles = StyleSheet.create({
     marginTop: 8,
     color: "#415049",
   },
-  keyTermWeak: {
-    color: "#8a3a3a",
-    fontWeight: "700",
+  statusMessage: {
+    marginTop: 8,
+    color: "#7a382f",
   },
-  keyTermStrong: {
-    color: "#256d4f",
+  decisionHeadline: {
     fontWeight: "700",
+    fontSize: 22,
+  },
+  quickActionsRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
   },
 });

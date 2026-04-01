@@ -1,11 +1,12 @@
-ï»¿import { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { Text, TextInput, View } from "react-native";
 import { placeholderSettings } from "../presentation/placeholderSettings";
-import { getAppSettings } from "../state/settingsState";
+import { getAppSettings, saveAppSettings } from "../state/settingsState";
 import { AppSettingsModel } from "../state/settingsTypes";
-import { getTargetSettings, saveTargetSettings } from "../state/targetsState";
 import { addStartPoint, listStartPoints, removeStartPoint, updateStartPoint } from "../state/startPoints";
 import { StartPoint } from "../state/startPointTypes";
+import { getTargetSettings, saveTargetSettings } from "../state/targetsState";
+import { getVehicleCostSettings, saveVehicleCostSettings } from "../state/vehicleCostState";
 import { daysUntil, shouldShowDueWarning } from "../utils/dueDates";
 import { formatGBP } from "../utils/format";
 import { Card, KeyValueRow, PrimaryButton, ScreenShell } from "./ui";
@@ -14,93 +15,170 @@ export function SettingsScreen() {
   const [settings, setSettings] = useState<AppSettingsModel | null>(null);
   const [targetHourlyInput, setTargetHourlyInput] = useState(`${placeholderSettings.targetHourly}`);
   const [targetMileInput, setTargetMileInput] = useState(`${placeholderSettings.targetPerMile}`);
+  const [mpgInput, setMpgInput] = useState(`${placeholderSettings.vehicleAssumptions.mpg}`);
+  const [fuelInput, setFuelInput] = useState(`${placeholderSettings.vehicleAssumptions.fuelPricePerLitre}`);
+  const [maintenanceInput, setMaintenanceInput] = useState(`${placeholderSettings.vehicleAssumptions.maintenancePerMile}`);
+  const [taxSavingsInput, setTaxSavingsInput] = useState(`${placeholderSettings.taxSavingsAmount}`);
   const [startPoints, setStartPoints] = useState<StartPoint[]>([]);
   const [newPostcode, setNewPostcode] = useState("");
   const [newLabel, setNewLabel] = useState("");
+  const [saveMessage, setSaveMessage] = useState<string | null>(null);
 
   useEffect(() => {
-    Promise.all([getAppSettings(), listStartPoints(), getTargetSettings()])
-      .then(([nextSettings, points, targets]) => {
+    Promise.all([getAppSettings(), listStartPoints(), getTargetSettings(), getVehicleCostSettings()])
+      .then(([nextSettings, points, targets, vehicle]) => {
         setSettings(nextSettings);
         setStartPoints(points);
         setTargetHourlyInput(`${targets.targetHourly}`);
         setTargetMileInput(`${targets.targetPerMile}`);
+        setMpgInput(`${vehicle.mpg}`);
+        setFuelInput(`${vehicle.fuelPricePerLitre}`);
+        setMaintenanceInput(`${vehicle.maintenancePerMile}`);
+        setTaxSavingsInput(`${nextSettings.taxSavingsAmount}`);
       })
       .catch(() => {
         setSettings(null);
         setStartPoints([]);
+        setSaveMessage("Couldn't load settings. Please retry.");
       });
   }, []);
 
-  const effective = settings ?? {
-    taxSavingsAmount: placeholderSettings.taxSavingsAmount,
-    estimatedTaxLiability: placeholderSettings.estimatedTaxLiability,
-    psvDueDate: placeholderSettings.psvDueDate,
-    insuranceDueDate: placeholderSettings.insuranceDueDate,
-    operatorLicenceDueDate: placeholderSettings.operatorLicenceDueDate,
-    trainingHoursCompleted: placeholderSettings.trainingHoursCompleted,
-    taxCorrectToDate: placeholderSettings.taxCorrectToDate,
-    maxStartShiftTravelRadiusMiles: placeholderSettings.maxStartShiftTravelRadiusMiles,
-  };
+  const effective =
+    settings ??
+    ({
+      taxSavingsAmount: placeholderSettings.taxSavingsAmount,
+      estimatedTaxLiability: placeholderSettings.estimatedTaxLiability,
+      psvDueDate: placeholderSettings.psvDueDate,
+      insuranceDueDate: placeholderSettings.insuranceDueDate,
+      operatorLicenceDueDate: placeholderSettings.operatorLicenceDueDate,
+      trainingHoursCompleted: placeholderSettings.trainingHoursCompleted,
+      taxCorrectToDate: placeholderSettings.taxCorrectToDate,
+      maxStartShiftTravelRadiusMiles: placeholderSettings.maxStartShiftTravelRadiusMiles,
+    } satisfies AppSettingsModel);
 
   const addPoint = async () => {
     if (!newPostcode.trim()) {
+      setSaveMessage("Enter a postcode before adding a start point.");
       return;
     }
 
-    await addStartPoint({ postcode: newPostcode, label: newLabel || newPostcode });
-    setStartPoints(await listStartPoints());
-    setNewPostcode("");
-    setNewLabel("");
+    try {
+      await addStartPoint({ postcode: newPostcode, label: newLabel || newPostcode });
+      setStartPoints(await listStartPoints());
+      setNewPostcode("");
+      setNewLabel("");
+      setSaveMessage("Start point saved.");
+    } catch {
+      setSaveMessage("Couldn't save start point right now. Try again.");
+    }
   };
 
   const removePoint = async (id: string) => {
-    await removeStartPoint(id);
-    setStartPoints(await listStartPoints());
+    try {
+      await removeStartPoint(id);
+      setStartPoints(await listStartPoints());
+      setSaveMessage("Start point removed.");
+    } catch {
+      setSaveMessage("Couldn't remove that start point. Try again.");
+    }
   };
 
   const renamePoint = async (point: StartPoint) => {
-    await updateStartPoint(point.id, {
-      postcode: point.postcode,
-      label: `${point.label} (Updated)`,
-    });
-    setStartPoints(await listStartPoints());
+    try {
+      await updateStartPoint(point.id, {
+        postcode: point.postcode,
+        label: `${point.label} (Updated)`,
+      });
+      setStartPoints(await listStartPoints());
+      setSaveMessage("Start point label updated.");
+    } catch {
+      setSaveMessage("Couldn't update start point label. Try again.");
+    }
   };
 
-  const saveTargets = async () => {
+  const saveControls = async () => {
     const parsedHourly = Number(targetHourlyInput);
     const parsedMile = Number(targetMileInput);
-    if (!Number.isFinite(parsedHourly) || !Number.isFinite(parsedMile)) {
+    const parsedMpg = Number(mpgInput);
+    const parsedFuel = Number(fuelInput);
+    const parsedMaintenance = Number(maintenanceInput);
+    const parsedTaxSavings = Number(taxSavingsInput);
+
+    if (
+      !Number.isFinite(parsedHourly) ||
+      !Number.isFinite(parsedMile) ||
+      !Number.isFinite(parsedMpg) ||
+      !Number.isFinite(parsedFuel) ||
+      !Number.isFinite(parsedMaintenance) ||
+      !Number.isFinite(parsedTaxSavings)
+    ) {
+      setSaveMessage("Check values and use valid numbers before saving.");
       return;
     }
 
-    await saveTargetSettings({
-      targetHourly: parsedHourly,
-      targetPerMile: parsedMile,
-    });
+    try {
+      await Promise.all([
+        saveTargetSettings({
+          targetHourly: parsedHourly,
+          targetPerMile: parsedMile,
+        }),
+        saveVehicleCostSettings({
+          mpg: parsedMpg,
+          fuelPricePerLitre: parsedFuel,
+          maintenancePerMile: parsedMaintenance,
+        }),
+        saveAppSettings({
+          ...effective,
+          taxSavingsAmount: parsedTaxSavings,
+        }),
+      ]);
+
+      const [nextSettings, targets, vehicle] = await Promise.all([
+        getAppSettings(),
+        getTargetSettings(),
+        getVehicleCostSettings(),
+      ]);
+
+      setSettings(nextSettings);
+      setTargetHourlyInput(`${targets.targetHourly}`);
+      setTargetMileInput(`${targets.targetPerMile}`);
+      setMpgInput(`${vehicle.mpg}`);
+      setFuelInput(`${vehicle.fuelPricePerLitre}`);
+      setMaintenanceInput(`${vehicle.maintenancePerMile}`);
+      setTaxSavingsInput(`${nextSettings.taxSavingsAmount}`);
+      setSaveMessage("Settings saved.");
+    } catch {
+      setSaveMessage("Couldn't save settings right now. Try again.");
+    }
   };
 
   return (
-    <ScreenShell
-      title="Settings"
-      subtitle="Decision controls, compliance dates, and preferred postcode starting points."
-    >
+    <ScreenShell title="Settings" subtitle="Decision controls, compliance dates, and preferred postcode starting points.">
       <Card title="Targets (Editable)">
-        <Text>Target Â£/hour</Text>
+        <Text>Target £/hour</Text>
         <TextInput value={targetHourlyInput} onChangeText={setTargetHourlyInput} style={styles.input} keyboardType="decimal-pad" />
-        <Text>Target Â£/mile</Text>
+        <Text>Target £/mile</Text>
         <TextInput value={targetMileInput} onChangeText={setTargetMileInput} style={styles.input} keyboardType="decimal-pad" />
-        <PrimaryButton label="Save targets" onPress={saveTargets} />
       </Card>
 
       <Card title="Vehicle Assumptions">
-        <KeyValueRow label="MPG" value={`${placeholderSettings.vehicleAssumptions.mpg}`} />
-        <KeyValueRow label="Fuel Â£/L" value={formatGBP(placeholderSettings.vehicleAssumptions.fuelPricePerLitre)} />
-        <KeyValueRow label="Maintenance Â£/mile" value={formatGBP(placeholderSettings.vehicleAssumptions.maintenancePerMile)} />
+        <Text>MPG</Text>
+        <TextInput value={mpgInput} onChangeText={setMpgInput} style={styles.input} keyboardType="decimal-pad" />
+        <Text>Fuel £/L</Text>
+        <TextInput value={fuelInput} onChangeText={setFuelInput} style={styles.input} keyboardType="decimal-pad" />
+        <Text>Maintenance £/mile</Text>
+        <TextInput value={maintenanceInput} onChangeText={setMaintenanceInput} style={styles.input} keyboardType="decimal-pad" />
+        <Text>HMRC recommend setting this at 45p per mile.</Text>
+        <Text>Fuel stays user-editable now and can later be refreshed from fuel receipts.</Text>
       </Card>
 
       <Card title="Tax + Compliance Controls">
-        <KeyValueRow label="Tax savings amount" value={formatGBP(effective.taxSavingsAmount)} />
+        <Text>Tax savings amount</Text>
+        <TextInput value={taxSavingsInput} onChangeText={setTaxSavingsInput} style={styles.input} keyboardType="decimal-pad" />
+        <PrimaryButton label="Save controls" onPress={saveControls} />
+        {saveMessage ? <Text>{saveMessage}</Text> : null}
+
+        <KeyValueRow label="Saved tax amount" value={formatGBP(effective.taxSavingsAmount)} />
         <KeyValueRow label="Estimated tax liability" value={formatGBP(effective.estimatedTaxLiability)} />
         <KeyValueRow label="Tax correct to" value={effective.taxCorrectToDate ?? "Not set"} />
         <KeyValueRow label="PSV due date" value={effective.psvDueDate ?? "Not set"} />
@@ -112,8 +190,7 @@ export function SettingsScreen() {
           value={`${effective.maxStartShiftTravelRadiusMiles.toFixed(1)} miles`}
         />
         <Text>
-          How far are you prepared to travel to start your shift? Used when checking whether a nearby area would be a
-          better place to begin working.
+          How far are you prepared to travel to start your shift? Used when checking whether a nearby area would be a better place to begin working.
         </Text>
       </Card>
 
@@ -132,18 +209,8 @@ export function SettingsScreen() {
 
       <Card title="Preferred Starting Points (Postcode)">
         <Text>Set the postcodes you are prepared to start from. These power start recommendations.</Text>
-        <TextInput
-          value={newPostcode}
-          onChangeText={setNewPostcode}
-          style={styles.input}
-          placeholder="Postcode (e.g. BT7)"
-        />
-        <TextInput
-          value={newLabel}
-          onChangeText={setNewLabel}
-          style={styles.input}
-          placeholder="Optional label"
-        />
+        <TextInput value={newPostcode} onChangeText={setNewPostcode} style={styles.input} placeholder="Postcode (e.g. BT7)" />
+        <TextInput value={newLabel} onChangeText={setNewLabel} style={styles.input} placeholder="Optional label" />
         <PrimaryButton label="Add start point" onPress={addPoint} />
 
         {startPoints.length === 0 ? (
@@ -183,4 +250,3 @@ const styles = {
     flexWrap: "wrap" as const,
   },
 };
-
