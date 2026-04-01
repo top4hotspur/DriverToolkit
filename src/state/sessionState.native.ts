@@ -7,38 +7,67 @@ export async function getSessionState(): Promise<SessionStateModel> {
   const db = await getDb();
   await ensureSessionRow();
 
-  const row = await db.getFirstAsync<{
-    mode: SessionMode;
-    currentAreaLabel: string | null;
-    trackingStartedAt: string | null;
-    trackingStoppedAt: string | null;
-    businessMileageTrackingEnabled: number;
-    accumulatedOnlineSeconds: number | null;
-  }>(`
-    SELECT
-      mode,
-      current_area_label as currentAreaLabel,
-      tracking_started_at as trackingStartedAt,
-      tracking_stopped_at as trackingStoppedAt,
-      business_mileage_tracking_enabled as businessMileageTrackingEnabled,
-      accumulated_online_seconds as accumulatedOnlineSeconds
-    FROM session_state
-    WHERE id = ?
-  `, [SESSION_ID]);
+  try {
+    const row = await db.getFirstAsync<{
+      mode: SessionMode;
+      currentAreaLabel: string | null;
+      trackingStartedAt: string | null;
+      trackingStoppedAt: string | null;
+      businessMileageTrackingEnabled: number;
+      accumulatedOnlineSeconds: number | null;
+    }>(`
+      SELECT
+        mode,
+        current_area_label as currentAreaLabel,
+        tracking_started_at as trackingStartedAt,
+        tracking_stopped_at as trackingStoppedAt,
+        business_mileage_tracking_enabled as businessMileageTrackingEnabled,
+        accumulated_online_seconds as accumulatedOnlineSeconds
+      FROM session_state
+      WHERE id = ?
+    `, [SESSION_ID]);
 
-  return {
-    mode: row?.mode ?? "offline",
-    currentAreaLabel: row?.currentAreaLabel ?? null,
-    trackingStartedAt: row?.trackingStartedAt ?? null,
-    trackingStoppedAt: row?.trackingStoppedAt ?? null,
-    businessMileageTrackingEnabled: (row?.businessMileageTrackingEnabled ?? 0) === 1,
-    accumulatedOnlineSeconds: Math.floor(row?.accumulatedOnlineSeconds ?? 0),
-  };
+    return {
+      mode: row?.mode ?? "offline",
+      currentAreaLabel: row?.currentAreaLabel ?? null,
+      trackingStartedAt: row?.trackingStartedAt ?? null,
+      trackingStoppedAt: row?.trackingStoppedAt ?? null,
+      businessMileageTrackingEnabled: (row?.businessMileageTrackingEnabled ?? 0) === 1,
+      accumulatedOnlineSeconds: Math.floor(row?.accumulatedOnlineSeconds ?? 0),
+    };
+  } catch {
+    const legacy = await db.getFirstAsync<{
+      mode: SessionMode;
+      currentAreaLabel: string | null;
+      trackingStartedAt: string | null;
+      trackingStoppedAt: string | null;
+      businessMileageTrackingEnabled: number;
+    }>(`
+      SELECT
+        mode,
+        current_area_label as currentAreaLabel,
+        tracking_started_at as trackingStartedAt,
+        tracking_stopped_at as trackingStoppedAt,
+        business_mileage_tracking_enabled as businessMileageTrackingEnabled
+      FROM session_state
+      WHERE id = ?
+    `, [SESSION_ID]);
+
+    return {
+      mode: legacy?.mode ?? "offline",
+      currentAreaLabel: legacy?.currentAreaLabel ?? null,
+      trackingStartedAt: legacy?.trackingStartedAt ?? null,
+      trackingStoppedAt: legacy?.trackingStoppedAt ?? null,
+      businessMileageTrackingEnabled: (legacy?.businessMileageTrackingEnabled ?? 0) === 1,
+      accumulatedOnlineSeconds: 0,
+    };
+  }
 }
 
 export async function setSessionMode(mode: SessionMode, areaLabel: string | null = null): Promise<SessionStateModel> {
   const db = await getDb();
   await ensureSessionRow();
+  await ensureSessionColumns();
 
   const previous = await getSessionState();
   const now = new Date();
@@ -81,6 +110,15 @@ export async function setCurrentAreaLabel(areaLabel: string | null): Promise<voi
     `,
     [areaLabel, new Date().toISOString(), SESSION_ID],
   );
+}
+
+async function ensureSessionColumns(): Promise<void> {
+  const db = await getDb();
+  const columns = await db.getAllAsync<{ name: string }>(`PRAGMA table_info(session_state)`);
+  const names = new Set(columns.map((column) => column.name));
+  if (!names.has("accumulated_online_seconds")) {
+    await db.execAsync(`ALTER TABLE session_state ADD COLUMN accumulated_online_seconds REAL DEFAULT 0`);
+  }
 }
 
 async function ensureSessionRow(): Promise<void> {

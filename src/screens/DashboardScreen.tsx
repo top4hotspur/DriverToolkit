@@ -420,7 +420,7 @@ export function DashboardScreen() {
           </Card>
 
           {upcomingWarnings.length > 0 || setupReminders.length > 0 ? (
-            <Card title="Upcoming Warnings">
+            <Card title="Reminders">
               {upcomingWarnings.map((warning, index) => (
                 <Text key={`warn-${index}`}>{warning}</Text>
               ))}
