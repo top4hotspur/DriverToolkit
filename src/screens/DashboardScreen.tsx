@@ -1,6 +1,6 @@
 import * as Location from "expo-location";
 import { useRouter } from "expo-router";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Animated, Pressable, StyleSheet, Text, View } from "react-native";
 import { GoOnlineNowDecisionContract } from "../contracts/goOnlineNow";
 import { OfflineAction } from "../contracts/tasks";
@@ -70,7 +70,23 @@ export function DashboardScreen() {
   const [latestImportToken, setLatestImportToken] = useState<string | null>(null);
   const [newAchievementResult, setNewAchievementResult] = useState(() => detectNewAchievementsAfterImport(0));
   const [actionMessage, setActionMessage] = useState<string | null>(null);
+  const [isToggling, setIsToggling] = useState(false);
   const [liveNow, setLiveNow] = useState(() => Date.now());
+
+  const refreshCanonicalState = useCallback(
+    async (options?: { suppressError?: boolean }) => {
+      try {
+        const [nextSession, nextMileage] = await Promise.all([getSessionState(), getBusinessMileageSummary()]);
+        setSession(nextSession);
+        setMileageSummary(nextMileage);
+      } catch {
+        if (!options?.suppressError) {
+          setActionMessage("Couldn't refresh session state right now.");
+        }
+      }
+    },
+    [],
+  );
 
   const dueWarnings = useMemo(() => {
     const warnings: string[] = [];
@@ -90,9 +106,7 @@ export function DashboardScreen() {
     let mounted = true;
 
     async function load() {
-      const [storedSession, mileage, loadedSettings, latestImport, points] = await Promise.all([
-        getSessionState(),
-        getBusinessMileageSummary(),
+      const [loadedSettings, latestImport, points] = await Promise.all([
         getAppSettings(),
         getLatestImportSummary(),
         listStartPoints(),
@@ -109,8 +123,7 @@ export function DashboardScreen() {
         latestImportToken: importToken,
       });
 
-      setSession(storedSession);
-      setMileageSummary(mileage);
+      await refreshCanonicalState({ suppressError: true });
       setSettings(loadedSettings);
       setStartPoints(points);
       setLatestImportToken(importToken);
@@ -130,24 +143,25 @@ export function DashboardScreen() {
 
     const interval = setInterval(() => {
       setLiveNow(Date.now());
-      getBusinessMileageSummary()
-        .then((next) => {
-          if (mounted) {
-            setMileageSummary(next);
-          }
-        })
-        .catch(() => {
-          if (mounted) {
-            setActionMessage("Mileage tracking summary is temporarily unavailable.");
-          }
-        });
     }, 1_000);
 
     return () => {
       mounted = false;
       clearInterval(interval);
     };
-  }, []);
+  }, [refreshCanonicalState]);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (!isToggling) {
+        refreshCanonicalState({ suppressError: true }).catch(() => {
+          // Keep polling silent unless an action explicitly fails.
+        });
+      }
+    }, 15_000);
+
+    return () => clearInterval(interval);
+  }, [isToggling, refreshCanonicalState]);
 
   useEffect(() => {
     if (session.mode !== "online") {
@@ -220,7 +234,13 @@ export function DashboardScreen() {
   }, [session.currentAreaLabel, session.mode]);
 
   const onToggleSession = async () => {
+    if (isToggling) {
+      return;
+    }
+
+    setIsToggling(true);
     setActionMessage(null);
+    const nowIso = new Date().toISOString();
 
     if (session.mode === "offline") {
       if (startPoints.length === 0) {
@@ -238,29 +258,50 @@ export function DashboardScreen() {
       }
 
       const chosenArea = startPoints[0]?.outwardCode ?? startPoints[0]?.postcode ?? session.currentAreaLabel ?? null;
+      setSession((previous) => ({
+        ...previous,
+        mode: "online",
+        currentAreaLabel: chosenArea ?? previous.currentAreaLabel,
+        trackingStartedAt: nowIso,
+        businessMileageTrackingEnabled: true,
+      }));
+
       try {
-        const next = await setSessionMode("online", chosenArea);
-        setSession(next);
+        await setSessionMode("online", chosenArea);
 
         const tracking = await startBusinessMileageTracking(chosenArea);
-        setMileageSummary(tracking.summary);
         if (!tracking.ok && tracking.warning) {
-          setActionMessage(tracking.warning);
+          await setSessionMode("offline", chosenArea);
+          await stopBusinessMileageTracking(chosenArea);
+          setActionMessage("Couldn't start online tracking. Stayed offline.");
         }
+        await refreshCanonicalState({ suppressError: true });
       } catch {
+        await refreshCanonicalState({ suppressError: true });
         setActionMessage("Couldn't go online right now. Please try again.");
+      } finally {
+        setIsToggling(false);
       }
       return;
     }
 
+    setSession((previous) => ({
+      ...previous,
+      mode: "offline",
+      trackingStoppedAt: nowIso,
+      businessMileageTrackingEnabled: false,
+    }));
+
     try {
-      const tracking = await stopBusinessMileageTracking(session.currentAreaLabel);
-      const next = await setSessionMode("offline", session.currentAreaLabel);
-      setSession(next);
-      setMileageSummary(tracking.summary);
+      await setSessionMode("offline", session.currentAreaLabel);
+      await stopBusinessMileageTracking(session.currentAreaLabel);
+      await refreshCanonicalState({ suppressError: true });
       setGoOnlineDecision(null);
     } catch {
+      await refreshCanonicalState({ suppressError: true });
       setActionMessage("Couldn't switch offline right now. Please try again.");
+    } finally {
+      setIsToggling(false);
     }
   };
 
@@ -351,6 +392,7 @@ export function DashboardScreen() {
         </Pressable>
         <Text style={styles.statusHint}>{session.mode === "online" ? "Tap to go offline" : "Tap to go online"}</Text>
         {session.mode === "offline" ? <Text style={styles.statusHint}>Mileage tracking inactive in offline mode</Text> : null}
+        {isToggling ? <Text style={styles.statusHint}>Updating session...</Text> : null}
         {actionMessage ? <Text style={styles.statusMessage}>{actionMessage}</Text> : null}
       </Card>
 
@@ -388,7 +430,7 @@ export function DashboardScreen() {
           </Card>
 
           <Card title="Business Mileage Tracking">
-            <KeyValueRow label="Tracking status" value={mileageSummary.active ? "Active" : "Paused"} />
+            <KeyValueRow label="Tracking status" value={mileageSummary.active ? "Active" : "Starting"} />
             <KeyValueRow label="Tracked business miles" value={formatMiles(mileageSummary.trackedBusinessMiles)} />
             <KeyValueRow label="Driver Toolkit online session time" value={formatDurationClock(currentOnlineSeconds)} />
             <Text>GPS mileage tracking runs only while online.</Text>
