@@ -22,6 +22,42 @@ function nowIso() {
   return new Date().toISOString();
 }
 
+function pickBestEntryName(entryNames, options) {
+  const normalizedEntries = entryNames.map((original) => ({
+    original,
+    lower: original.toLowerCase(),
+  }));
+
+  const filtered = normalizedEntries.filter((entry) =>
+    options.exclude.every((pattern) => !entry.lower.includes(pattern))
+  );
+
+  for (const pattern of options.prefer) {
+    const hit = filtered.find((entry) => entry.lower.includes(pattern));
+    if (hit) {
+      return {
+        selected: hit.original,
+        candidates: filtered.map((entry) => entry.original),
+      };
+    }
+  }
+
+  for (const pattern of options.fallback) {
+    const hit = filtered.find((entry) => entry.lower.includes(pattern));
+    if (hit) {
+      return {
+        selected: hit.original,
+        candidates: filtered.map((entry) => entry.original),
+      };
+    }
+  }
+
+  return {
+    selected: null,
+    candidates: filtered.map((entry) => entry.original),
+  };
+}
+
 function buildStatusPayload(record) {
   const stageProgress = {
     created: 5,
@@ -177,31 +213,54 @@ app.post("/api/imports/:importId/confirm", (req, res) => {
     const names = entryNames.map((entryName) => entryName.toLowerCase());
     console.log(`[IMPORT][confirm] entries=${JSON.stringify(entryNames)}`);
 
-    const tripsEntryName = entryNames.find((entryName) =>
-      entryName.toLowerCase().includes("trips")
-    ) ?? null;
-    const paymentsEntryName = entryNames.find((entryName) =>
-      entryName.toLowerCase().includes("payment")
-    ) ?? null;
-    const analyticsEntryName = entryNames.find((entryName) => {
-      const lower = entryName.toLowerCase();
-      return lower.includes("analytics") || lower.includes("earnings");
-    }) ?? null;
+    const tripsMatch = pickBestEntryName(entryNames, {
+      prefer: ["driver_lifetime_trips"],
+      fallback: ["driver/trips", "driver_trips", "driver trips", "trips"],
+      exclude: ["rider", "account and profile", "account/profile"],
+    });
+    const paymentsMatch = pickBestEntryName(entryNames, {
+      prefer: ["driver_payments"],
+      fallback: ["driver/payment", "driver_payment"],
+      exclude: [
+        "payment_methods",
+        "payment-methods",
+        "account and profile",
+        "account/profile",
+        "rider",
+      ],
+    });
+    const analyticsMatch = pickBestEntryName(entryNames, {
+      prefer: ["driver_app_analytics"],
+      fallback: ["driver/analytics", "driver_analytics", "driver_earnings"],
+      exclude: ["rider_app_analytics", "rider", "account and profile", "account/profile"],
+    });
 
-    const tripsFileFound = names.some((name) => name.includes("trips"));
-    const paymentsFileFound = names.some((name) => name.includes("payment"));
-    const analyticsFileFound = names.some(
-      (name) => name.includes("analytics") || name.includes("earnings")
+    const tripsEntryName = tripsMatch.selected;
+    const paymentsEntryName = paymentsMatch.selected;
+    const analyticsEntryName = analyticsMatch.selected;
+
+    const tripsFileFound = Boolean(tripsEntryName);
+    const paymentsFileFound = Boolean(paymentsEntryName);
+    const analyticsFileFound = Boolean(analyticsEntryName);
+
+    console.log(
+      `[IMPORT][confirm] candidates trips=${JSON.stringify(tripsMatch.candidates)}`
+    );
+    console.log(
+      `[IMPORT][confirm] candidates payments=${JSON.stringify(paymentsMatch.candidates)}`
+    );
+    console.log(
+      `[IMPORT][confirm] candidates analytics=${JSON.stringify(analyticsMatch.candidates)}`
     );
     console.log(`[IMPORT][confirm] detected trips=${tripsEntryName}`);
     console.log(`[IMPORT][confirm] detected payments=${paymentsEntryName}`);
     console.log(`[IMPORT][confirm] detected analytics=${analyticsEntryName}`);
 
-    const ignoredFilesCount = names.filter((name) => {
-      const isTrips = name.includes("trips");
-      const isPayments = name.includes("payment");
-      const isAnalytics = name.includes("analytics") || name.includes("earnings");
-      return !isTrips && !isPayments && !isAnalytics;
+    const selectedSet = new Set(
+      [tripsEntryName, paymentsEntryName, analyticsEntryName].filter(Boolean)
+    );
+    const ignoredFilesCount = entryNames.filter((name) => {
+      return !selectedSet.has(name);
     }).length;
     console.log(`[IMPORT][confirm] ignoredFilesCount=${ignoredFilesCount}`);
 
