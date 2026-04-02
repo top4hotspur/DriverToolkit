@@ -30,7 +30,7 @@ export function SmartDiaryScreen() {
   return (
     <ScreenShell
       title="Smart Diary"
-      subtitle="7-day rolling planner with anomaly warnings and planned opportunities from monitored anchors."
+      subtitle="7 day rolling planner from favourites and live disruption monitoring"
     >
       <Card title="Planner Basis" compact>
         <Text>{planner.basisLabel}</Text>
@@ -100,7 +100,6 @@ function OpportunityRow(props: { opportunity: OpportunityWindow }) {
       <Text style={styles.rowTitle}>{`${windowText} - ${props.opportunity.anchorLabel}`}</Text>
       <Text>{props.opportunity.title}</Text>
       <Text>{props.opportunity.detail}</Text>
-      <Text style={styles.confidenceText}>{`${mapConfidence(props.opportunity.confidence)} evidence`}</Text>
     </View>
   );
 }
@@ -111,16 +110,6 @@ function formatTime(input: string): string {
     return "--:--";
   }
   return date.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", hour12: false });
-}
-
-function mapConfidence(value: OpportunityWindow["confidence"]): string {
-  if (value === "HIGH") {
-    return "Strong";
-  }
-  if (value === "MEDIUM") {
-    return "Good";
-  }
-  return "Light";
 }
 
 function mapSeverity(value: DayAnomaly["severity"]): string {
@@ -175,9 +164,5 @@ const styles = StyleSheet.create({
   rowTitle: {
     fontWeight: "700",
     color: "#1f302b",
-  },
-  confidenceText: {
-    color: "#2e5f4b",
-    fontWeight: "600",
   },
 });

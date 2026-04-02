@@ -98,8 +98,8 @@ export function DashboardScreen() {
       try {
         const [nextSession, nextMileage] = await Promise.all([getSessionState(), getBusinessMileageSummary()]);
         const mergedSession =
-          nextSession.mode === "online" && !nextSession.currentAreaLabel && latestAreaLabelRef.current
-            ? { ...nextSession, currentAreaLabel: latestAreaLabelRef.current }
+          nextSession.mode === "online" && !nextSession.currentAreaLabel
+            ? nextSession
             : nextSession;
         setSession(mergedSession);
         if (mergedSession.currentAreaLabel) {
@@ -310,7 +310,6 @@ export function DashboardScreen() {
           existingLabel: latestAreaLabelRef.current,
         });
 
-        const shouldPersist = label !== latestAreaLabelRef.current;
         latestAreaLabelRef.current = label;
         setSession((prev) => {
           if (prev.currentAreaLabel === label) {
@@ -318,22 +317,21 @@ export function DashboardScreen() {
           }
           return { ...prev, currentAreaLabel: label };
         });
-        logLocation("live-area-applied", { label, shouldPersist });
+        logLocation("live-area-applied", { label });
 
-        if (shouldPersist) {
-          logLocation("persist-before", { label });
-          await setCurrentAreaLabel(label);
-          logLocation("persist-after", { label });
-          if (!active) {
-            return;
-          }
-          await refreshCanonicalState({ suppressError: true });
+        logLocation("persist-before", { label });
+        await setCurrentAreaLabel(label);
+        logLocation("persist-after", { label });
+        if (!active) {
+          return;
         }
+        await refreshCanonicalState({ suppressError: true });
+        logLocation("refresh-after-persist", { label });
         areaAttemptsRef.current = 0;
         setAreaResolutionAttempts(0);
-        if (actionMessage?.startsWith("Still resolving")) {
-          setActionMessage(null);
-        }
+        setActionMessage((previous) =>
+          previous?.startsWith("Still resolving") ? null : previous,
+        );
       } catch {
         if (active) {
           areaAttemptsRef.current += 1;
@@ -442,17 +440,27 @@ export function DashboardScreen() {
             trackingStartedAt: null,
           }));
           setActionMessage("Couldn't start online tracking. Stayed offline.");
+          await refreshCanonicalState({ suppressError: true });
+          setIsToggling(false);
+          return;
         }
         await refreshCanonicalState({ suppressError: true });
         if (tracking.ok) {
           setActionMessage(null);
         }
       } catch {
+        await setSessionMode("offline", chosenArea).catch(() => {
+          // Best effort rollback.
+        });
+        await stopBusinessMileageTracking(chosenArea).catch(() => {
+          // Best effort rollback.
+        });
         setSession((previous) => ({
           ...previous,
           mode: "offline",
           businessMileageTrackingEnabled: false,
           trackingStartedAt: null,
+          currentAreaLabel: null,
         }));
         await refreshCanonicalState({ suppressError: true });
         setActionMessage("Couldn't go online right now. Please try again.");
@@ -519,6 +527,7 @@ export function DashboardScreen() {
   };
 
   const rec = placeholderDashboard.recommendation;
+  const renderedAreaLabel = session.currentAreaLabel;
   const offlineHighlight = getOfflineContextualAchievementHighlight({
     now: new Date(),
     recentNewAchievements: newAchievementResult,
@@ -572,7 +581,7 @@ export function DashboardScreen() {
           )}
           <Text style={styles.statusText}>
             {session.mode === "online"
-              ? `Online - ${session.currentAreaLabel ?? latestAreaLabelRef.current ?? "Locating area"}`
+              ? `Online - ${renderedAreaLabel ?? "Locating area"}`
               : "Offline"}
           </Text>
         </Pressable>
@@ -585,7 +594,7 @@ export function DashboardScreen() {
       {session.mode === "online" ? (
         <>
           <Card title="Current Location">
-            <KeyValueRow label="Current area" value={session.currentAreaLabel ?? latestAreaLabelRef.current ?? "Locating area"} />
+            <KeyValueRow label="Current area" value={renderedAreaLabel ?? "Locating area"} />
             <Text style={styles.decisionHeadline}>{userFacingAction}</Text>
             <ConfidenceBadge
               evidenceLabel={evidenceLabelFromConfidence(rec.confidence)}

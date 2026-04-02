@@ -95,7 +95,7 @@ export function buildDiaryPlanner(args: {
   return {
     generatedAt: args.now.toISOString(),
     basisLabel:
-      "7-day rolling planner from favourites + monitored anchors with weather/disruption anomaly layering.",
+      "7 day rolling planner from favourites and live disruption monitoring",
     sourceAnchors,
     days,
   };
@@ -230,7 +230,7 @@ function buildWeatherAnomaly(date: Date, anchor: TrackedPlace | undefined): Weat
     areaLabel: anchor?.label ?? "Your monitored area",
     startsAt: startsAt.toISOString(),
     endsAt: endsAt.toISOString(),
-    message: `Weather warning for rain detected ${formatHourWindow(startsAt, endsAt)}.`,
+    message: `Weather warning in this period (${formatHourWindow(startsAt, endsAt)}).`,
   };
 }
 
@@ -254,7 +254,7 @@ function buildTransportAnomaly(date: Date, trackedPlaces: TrackedPlace[]): Trans
     networkLabel: `${station.label} rail corridor`,
     startsAt: startsAt.toISOString(),
     endsAt: endsAt.toISOString(),
-    message: `${station.label} engineering works expected - replacement bus service likely during ${formatHourWindow(startsAt, endsAt)}.`,
+    message: `Rail disruption expected in this period (${formatHourWindow(startsAt, endsAt)}).`,
   };
 }
 
@@ -293,22 +293,22 @@ function buildAirportAnomaly(date: Date, trackedPlaces: TrackedPlace[]): Airport
 
 function buildOpportunityTitle(place: TrackedPlace): string {
   if (place.type === "airport") {
-    return `${shortCode(place.label)} arrivals above baseline`;
+    return `${shortCode(place.label)} arrivals window`;
   }
   if (place.type === "station") {
-    return `${place.label} passenger flow window`;
+    return `${place.label} passenger window`;
   }
-  return `${place.label} event release window`;
+  return `${place.label} event window`;
 }
 
 function buildOpportunityDetail(place: TrackedPlace, arrivals: number, baseline: number): string {
   if (place.type === "airport") {
-    return `Higher than average number of flights arriving (${arrivals} vs ${baseline} baseline).`;
+    return `Higher than average flight arrivals expected.`;
   }
   if (place.type === "station") {
-    return `Commuter and interchange flow is typically stronger than baseline in this block.`;
+    return `Higher than average passenger arrivals expected.`;
   }
-  return `Likely end-of-event pickup window based on monitored venue timing.`;
+  return `Event due to end.`;
 }
 
 function evaluatePlaceAnomaly(place: TrackedPlace, now: Date): LiveArrivalAnomaly | null {
