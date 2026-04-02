@@ -23,6 +23,35 @@ type ParsedCsv = {
   fileName: string;
   rows: Array<Record<string, string>>;
   fields: string[];
+  sampleRows: Array<Record<string, string>>;
+};
+
+type TripBuildResult = {
+  candidates: UberTripCandidate[];
+  timestampFieldUsed: string | null;
+  validTimestampCount: number;
+  validAfterFilteringCount: number;
+  sampleParsedRequestTimestamps: string[];
+};
+
+type PaymentBuildResult = {
+  groups: UberPaymentGroup[];
+  unknownRows: UberUnknownClassificationRow[];
+  timestampFieldUsed: string | null;
+  tripUuidFieldUsed: string | null;
+  amountFieldUsed: string | null;
+  validTimestampCount: number;
+  validTripUuidCount: number;
+  validAfterFilteringCount: number;
+  sampleParsedPaymentTimestamps: string[];
+  paymentTimestampIsoValues: Array<string | null>;
+};
+
+type DateRangeWithDiagnostics = {
+  startAt: string | null;
+  endAt: string | null;
+  fieldUsed: string | null;
+  validCount: number;
 };
 
 type PaymentScoredCandidate = {
@@ -39,8 +68,8 @@ const REQUIRED_TRIP_FIELD_GROUPS: Array<{ label: string; candidates: string[] }>
   { label: "dropoff timestamp", candidates: ["dropoff_time", "dropoff_timestamp", "dropofftime", "end_time"] },
 ];
 const REQUIRED_PAYMENT_FIELD_GROUPS: Array<{ label: string; candidates: string[] }> = [
-  { label: "trip uuid", candidates: ["trip_uuid", "tripuuid", "trip id", "tripid"] },
-  { label: "amount", candidates: ["amount", "value", "net_amount", "total"] },
+  { label: "trip uuid", candidates: ["trip_uuid", "tripuuid", "trip_id", "tripid", "trip_uuids"] },
+  { label: "amount", candidates: ["amount", "value", "net_amount", "total", "local_amount", "amount_local", "gross_amount"] },
 ];
 
 const PAYMENT_BUCKETS = {
@@ -118,25 +147,28 @@ export function buildUberTripPaymentArtifacts(
   const payments = parseCsv(input.paymentsFile);
   const analytics = input.analyticsFile ? parseCsv(input.analyticsFile) : null;
 
-  const tripsCandidates = buildTripCandidates(trips);
+  const tripsBuild = buildTripCandidates(trips);
   const paymentBuild = buildPaymentGroups(payments);
   const validation = validateMatchingDataset({
     trips,
-    tripsCandidates,
+    tripsBuild,
     payments,
-    paymentGroups: paymentBuild.groups,
+    paymentsBuild: paymentBuild,
     analytics,
+    discovery: input.discovery ?? fallbackDiscovery(input, []),
   });
+
+  console.log("[DT][uber-import][diagnostics]", validation.diagnostics);
 
   if (!validation.ok) {
     return {
       discovery:
         input.discovery ?? fallbackDiscovery(input, []),
       validation,
-      tripCandidates: tripsCandidates,
+      tripCandidates: tripsBuild.candidates,
       paymentGroups: paymentBuild.groups,
       matchedTrips: [],
-      unmatchedTrips: tripsCandidates.map((trip) => ({
+      unmatchedTrips: tripsBuild.candidates.map((trip) => ({
         tripId: trip.tripId,
         dropoffTimestamp: trip.dropoffTimestamp,
         beginTripTimestamp: trip.beginTripTimestamp,
@@ -155,11 +187,11 @@ export function buildUberTripPaymentArtifacts(
     };
   }
 
-  const matchResult = assignTripsToPayments(tripsCandidates, paymentBuild.groups);
+  const matchResult = assignTripsToPayments(tripsBuild.candidates, paymentBuild.groups);
   const tripIdSet = new Set(matchResult.matches.map((row) => row.tripId));
   const tripUuidSet = new Set(matchResult.matches.map((row) => row.tripUuid));
 
-  const unmatchedTrips: UberUnmatchedTripRow[] = tripsCandidates
+  const unmatchedTrips: UberUnmatchedTripRow[] = tripsBuild.candidates
     .filter((trip) => !tripIdSet.has(trip.tripId))
     .map((trip) => ({
       tripId: trip.tripId,
@@ -181,14 +213,14 @@ export function buildUberTripPaymentArtifacts(
   const analyticsInference = buildAnalyticsInference({
     validation,
     analytics,
-    trips: tripsCandidates,
+    trips: tripsBuild.candidates,
   });
 
   return {
     discovery:
       input.discovery ?? fallbackDiscovery(input, []),
     validation,
-    tripCandidates: tripsCandidates,
+    tripCandidates: tripsBuild.candidates,
     paymentGroups: paymentBuild.groups,
     matchedTrips: matchResult.matches,
     unmatchedTrips,
@@ -223,24 +255,37 @@ function parseCsv(file: UberMatchCsvFileInput): ParsedCsv {
   });
 
   const fields = (parsed.meta.fields ?? []).filter(Boolean);
+  const sampleRows = parsed.data.slice(0, 3).map((row) => {
+    const sample: Record<string, string> = {};
+    for (const key of fields.slice(0, 10)) {
+      sample[key] = String(row[key] ?? "");
+    }
+    return sample;
+  });
   return {
     fileName: file.fileName,
     rows: parsed.data,
     fields,
+    sampleRows,
   };
 }
 
 function validateMatchingDataset(args: {
   trips: ParsedCsv;
-  tripsCandidates: UberTripCandidate[];
+  tripsBuild: TripBuildResult;
   payments: ParsedCsv;
-  paymentGroups: UberPaymentGroup[];
+  paymentsBuild: PaymentBuildResult;
   analytics: ParsedCsv | null;
+  discovery: UberTripPaymentMatchArtifacts["discovery"];
 }): UberMatchingValidationResult {
-  const tripsRange = dateRangeFromTrips(args.tripsCandidates.map((trip) => trip.dropoffTimestamp ?? trip.beginTripTimestamp));
-  const paymentsRange = dateRangeFromPayments(args.paymentGroups.map((group) => group.paymentTimestampAnchor));
+  const tripsRange = dateRangeFromTrips(
+    args.tripsBuild.candidates.map((trip) => trip.dropoffTimestamp ?? trip.beginTripTimestamp),
+  );
+  const paymentsRange = dateRangeFromPayments(
+    args.paymentsBuild.paymentTimestampIsoValues.filter((value): value is string => Boolean(value)),
+  );
   const analyticsRange = args.analytics
-    ? dateRangeFromRows(args.analytics.rows, ["event_timestamp", "timestamp", "recorded_at", "time"])
+    ? dateRangeFromRows(args.analytics.rows, ["event_timestamp", "timestamp", "recorded_at", "time", "event_time"])
     : null;
 
   const tripsCurrencies = collectDistinctValues(args.trips.rows, ["currency_code", "currency", "currencycode"]);
@@ -283,18 +328,34 @@ function validateMatchingDataset(args: {
   const ok =
     missingTripColumns.length === 0 &&
     missingPaymentColumns.length === 0 &&
+    args.tripsBuild.validTimestampCount > 0 &&
+    args.paymentsBuild.validTimestampCount > 0 &&
     overlapTripsPayments;
 
   let userFacingError: string | null = null;
-  if (!overlapTripsPayments) {
-    userFacingError = "Trips and payments files do not overlap in time. Please upload files from the same period.";
-  } else if (missingTripColumns.length > 0 || missingPaymentColumns.length > 0) {
+  let userFacingIssueType: UberMatchingValidationResult["userFacingIssueType"] = "none";
+
+  if (missingTripColumns.length > 0 || missingPaymentColumns.length > 0) {
+    userFacingIssueType = "missing-required-columns";
     userFacingError = "Required columns are missing in trips or payments file.";
+  } else if (args.trips.rows.length === 0 || args.payments.rows.length === 0) {
+    userFacingIssueType = "file-unreadable";
+    userFacingError = "Trips or payments file was found, but rows could not be read. Please re-export and try again.";
+  } else if (args.tripsBuild.validTimestampCount === 0) {
+    userFacingIssueType = "no-valid-trip-timestamps";
+    userFacingError = "Trips file found, but no valid trip timestamps could be parsed.";
+  } else if (args.paymentsBuild.validTimestampCount === 0) {
+    userFacingIssueType = "no-valid-payment-timestamps";
+    userFacingError = "Payments file found, but no valid payment timestamps could be parsed.";
+  } else if (!overlapTripsPayments) {
+    userFacingIssueType = "no-overlap";
+    userFacingError = "Trips and payments files do not overlap in time. Please upload files from the same period.";
   }
 
   return {
     ok,
     userFacingError,
+    userFacingIssueType,
     trips: {
       fileName: args.trips.fileName,
       rowCount: args.trips.rows.length,
@@ -324,30 +385,105 @@ function validateMatchingDataset(args: {
       paymentsAnalyticsOverlap: overlapPaymentsAnalytics,
     },
     warnings,
+    diagnostics: {
+      discoveredFiles: {
+        tripsFileName: args.discovery.tripsFileName ?? args.trips.fileName,
+        paymentsFileName: args.discovery.paymentsFileName ?? args.payments.fileName,
+        analyticsFileName: args.discovery.analyticsFileName ?? args.analytics?.fileName ?? null,
+        allCsvFileNames: [
+          args.discovery.tripsFileName,
+          args.discovery.paymentsFileName,
+          args.discovery.analyticsFileName,
+          ...args.discovery.ignoredFileNames,
+        ].filter((name): name is string => Boolean(name)),
+      },
+      trips: {
+        detectedHeaders: args.trips.fields,
+        sampleRows: args.trips.sampleRows,
+        timestampFieldUsed: args.tripsBuild.timestampFieldUsed,
+        validTimestampCount: args.tripsBuild.validTimestampCount,
+        validAfterFilteringCount: args.tripsBuild.validAfterFilteringCount,
+        sampleParsedRequestTimestamps: args.tripsBuild.sampleParsedRequestTimestamps,
+      },
+      payments: {
+        detectedHeaders: args.payments.fields,
+        sampleRows: args.payments.sampleRows,
+        timestampFieldUsed: args.paymentsBuild.timestampFieldUsed,
+        tripUuidFieldUsed: args.paymentsBuild.tripUuidFieldUsed,
+        amountFieldUsed: args.paymentsBuild.amountFieldUsed,
+        validTimestampCount: args.paymentsBuild.validTimestampCount,
+        validTripUuidCount: args.paymentsBuild.validTripUuidCount,
+        validAfterFilteringCount: args.paymentsBuild.validAfterFilteringCount,
+        groupsCreatedCount: args.paymentsBuild.groups.length,
+        sampleParsedPaymentTimestamps: args.paymentsBuild.sampleParsedPaymentTimestamps,
+      },
+      analytics: args.analytics
+        ? {
+            detectedHeaders: args.analytics.fields,
+            sampleRows: args.analytics.sampleRows,
+            timestampFieldUsed: analyticsRange?.fieldUsed ?? null,
+            validTimestampCount: analyticsRange?.validCount ?? 0,
+          }
+        : null,
+    },
   };
 }
 
-function buildPaymentGroups(csv: ParsedCsv): {
-  groups: UberPaymentGroup[];
-  unknownRows: UberUnknownClassificationRow[];
-} {
-  const tripUuidKey = pickField(csv.fields, ["trip_uuid", "tripuuid", "trip id", "tripid"]);
-  const timestampKey = pickField(csv.fields, ["timestamp", "payment_timestamp", "created_at", "transaction_time", "date"]);
-  const amountKey = pickField(csv.fields, ["amount", "value", "net_amount", "total"]);
+function buildPaymentGroups(csv: ParsedCsv): PaymentBuildResult {
+  const tripUuidKey = pickField(csv.fields, ["trip_uuid", "tripuuid", "trip_id", "tripid", "trip_uuids"]);
+  const timestampKey = pickField(csv.fields, [
+    "timestamp",
+    "payment_timestamp",
+    "created_at",
+    "transaction_time",
+    "date",
+    "transaction_timestamp",
+    "job_timestamp",
+    "request_timestamp",
+  ]);
+  const amountKey = pickField(csv.fields, ["amount", "value", "net_amount", "total", "local_amount", "amount_local", "gross_amount"]);
   const classificationKey = pickField(csv.fields, ["classification", "type", "description", "line_item", "payment_type"]);
   const categoryKey = pickField(csv.fields, ["category", "group", "bucket"]);
   const currencyKey = pickField(csv.fields, ["currency_code", "currency", "currencycode"]);
 
   if (!tripUuidKey || !amountKey) {
-    return { groups: [], unknownRows: [] };
+    return {
+      groups: [],
+      unknownRows: [],
+      timestampFieldUsed: timestampKey,
+      tripUuidFieldUsed: tripUuidKey,
+      amountFieldUsed: amountKey,
+      validTimestampCount: 0,
+      validTripUuidCount: 0,
+      validAfterFilteringCount: 0,
+      sampleParsedPaymentTimestamps: [],
+      paymentTimestampIsoValues: [],
+    };
   }
 
   const byTrip = new Map<string, { rows: Array<Record<string, string>>; currencyCode: string | null }>();
+  let validTripUuidCount = 0;
+  let validTimestampCount = 0;
+  let validAfterFilteringCount = 0;
+  const sampleParsedPaymentTimestamps: string[] = [];
+  const paymentTimestampIsoValues: Array<string | null> = [];
   for (const row of csv.rows) {
     const tripUuid = safeTrim(row[tripUuidKey]);
+    if (tripUuid) {
+      validTripUuidCount += 1;
+    }
+    const parsedTimestamp = timestampKey ? parseUberDateTime(row[timestampKey]) : null;
+    paymentTimestampIsoValues.push(parsedTimestamp);
+    if (parsedTimestamp) {
+      validTimestampCount += 1;
+      if (sampleParsedPaymentTimestamps.length < 3) {
+        sampleParsedPaymentTimestamps.push(parsedTimestamp);
+      }
+    }
     if (!tripUuid) {
       continue;
     }
+    validAfterFilteringCount += 1;
     if (!byTrip.has(tripUuid)) {
       byTrip.set(tripUuid, {
         rows: [],
@@ -385,7 +521,7 @@ function buildPaymentGroups(csv: ParsedCsv): {
 
       const classificationRaw = classificationKey ? safeTrim(row[classificationKey]) : null;
       const categoryRaw = categoryKey ? safeTrim(row[categoryKey]) : null;
-      const paymentTimestamp = timestampKey ? toIsoDateTime(row[timestampKey]) : null;
+      const paymentTimestamp = timestampKey ? parseUberDateTime(row[timestampKey]) : null;
       if (!paymentAnchor && paymentTimestamp) {
         paymentAnchor = paymentTimestamp;
       }
@@ -443,11 +579,22 @@ function buildPaymentGroups(csv: ParsedCsv): {
     });
   }
 
-  return { groups, unknownRows };
+  return {
+    groups,
+    unknownRows,
+    timestampFieldUsed: timestampKey,
+    tripUuidFieldUsed: tripUuidKey,
+    amountFieldUsed: amountKey,
+    validTimestampCount,
+    validTripUuidCount,
+    validAfterFilteringCount,
+    sampleParsedPaymentTimestamps,
+    paymentTimestampIsoValues,
+  };
 }
 
-function buildTripCandidates(csv: ParsedCsv): UberTripCandidate[] {
-  const requestKey = pickField(csv.fields, ["request_time", "request_timestamp", "requested_at", "request"]);
+function buildTripCandidates(csv: ParsedCsv): TripBuildResult {
+  const requestKey = pickField(csv.fields, ["request_time", "request_timestamp", "requested_at", "request", "request_at"]);
   const beginKey = pickField(csv.fields, ["begin_trip_time", "begintrip_timestamp", "begintriptime", "start_time", "begin"]);
   const dropoffKey = pickField(csv.fields, ["dropoff_time", "dropoff_timestamp", "dropofftime", "end_time", "dropoff"]);
   const distanceKey = pickField(csv.fields, ["trip_distance_miles", "distance_miles", "distance", "miles"]);
@@ -460,12 +607,22 @@ function buildTripCandidates(csv: ParsedCsv): UberTripCandidate[] {
   const plateKey = pickField(csv.fields, ["license_plate", "licence_plate", "plate", "vehicle_plate"]);
   const tripIdKey = pickField(csv.fields, ["trip_id", "tripid", "uuid", "trip_uuid"]);
 
-  return csv.rows.map((row, index) => {
-    const beginTripTimestamp = beginKey ? toIsoDateTime(row[beginKey]) : null;
-    const dropoffTimestamp = dropoffKey ? toIsoDateTime(row[dropoffKey]) : null;
+  let validTimestampCount = 0;
+  const sampleParsedRequestTimestamps: string[] = [];
+
+  const candidates = csv.rows.map((row, index) => {
+    const requestTimestamp = requestKey ? parseUberDateTime(row[requestKey]) : null;
+    const beginTripTimestamp = beginKey ? parseUberDateTime(row[beginKey]) : null;
+    const dropoffTimestamp = dropoffKey ? parseUberDateTime(row[dropoffKey]) : null;
+    if (requestTimestamp || beginTripTimestamp || dropoffTimestamp) {
+      validTimestampCount += 1;
+    }
+    if (requestTimestamp && sampleParsedRequestTimestamps.length < 3) {
+      sampleParsedRequestTimestamps.push(requestTimestamp);
+    }
     return {
       tripId: safeTrim(tripIdKey ? row[tripIdKey] : null) ?? `trip-row-${index}`,
-      requestTimestamp: requestKey ? toIsoDateTime(row[requestKey]) : null,
+      requestTimestamp,
       beginTripTimestamp,
       dropoffTimestamp,
       tripDistanceMiles: distanceKey ? normalizeDistanceMiles(row[distanceKey]) : null,
@@ -479,6 +636,14 @@ function buildTripCandidates(csv: ParsedCsv): UberTripCandidate[] {
       sourceRow: row,
     };
   });
+
+  return {
+    candidates,
+    timestampFieldUsed: requestKey ?? beginKey ?? dropoffKey ?? null,
+    validTimestampCount,
+    validAfterFilteringCount: candidates.length,
+    sampleParsedRequestTimestamps,
+  };
 }
 
 function assignTripsToPayments(
@@ -663,7 +828,7 @@ function buildAnalyticsInference(args: {
 
   const points = args.analytics.rows
     .map((row) => {
-      const timestamp = toIsoDateTime(row[timestampKey]);
+      const timestamp = parseUberDateTime(row[timestampKey]);
       const latitude = toNumber(row[latKey]);
       const longitude = toNumber(row[lngKey]);
       if (!timestamp || latitude === null || longitude === null) {
@@ -765,13 +930,19 @@ function dateRangeFromPayments(values: Array<string | null>): { startAt: string 
   return dateRangeFromIso(values);
 }
 
-function dateRangeFromRows(rows: Array<Record<string, string>>, candidates: string[]): { startAt: string | null; endAt: string | null } {
+function dateRangeFromRows(rows: Array<Record<string, string>>, candidates: string[]): DateRangeWithDiagnostics {
   const keys = Object.keys(rows[0] ?? {});
   const key = pickField(keys, candidates);
   if (!key) {
-    return { startAt: null, endAt: null };
+    return { startAt: null, endAt: null, fieldUsed: null, validCount: 0 };
   }
-  return dateRangeFromIso(rows.map((row) => toIsoDateTime(row[key])));
+  const values = rows.map((row) => parseUberDateTime(row[key]));
+  const range = dateRangeFromIso(values);
+  return {
+    ...range,
+    fieldUsed: key,
+    validCount: values.filter((value): value is string => Boolean(value)).length,
+  };
 }
 
 function dateRangeFromIso(values: Array<string | null>): { startAt: string | null; endAt: string | null } {
@@ -829,9 +1000,14 @@ function collectDistinctValues(rows: Array<Record<string, string>>, keys: string
 }
 
 function pickField(fields: string[], candidates: string[]): string | null {
+  const normalized = new Map<string, string>();
+  for (const field of fields) {
+    normalized.set(normalizeUberHeader(field), field);
+  }
   for (const candidate of candidates) {
-    if (fields.includes(candidate)) {
-      return candidate;
+    const resolved = normalized.get(normalizeUberHeader(candidate));
+    if (resolved) {
+      return resolved;
     }
   }
   return null;
@@ -867,6 +1043,37 @@ function safeTrim(value: unknown): string | null {
   }
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : null;
+}
+
+function parseUberDateTime(value: unknown): string | null {
+  const raw = safeTrim(value);
+  if (!raw) {
+    return null;
+  }
+
+  const stripped = raw.replace(/^['"]|['"]$/g, "").trim();
+  if (!stripped) {
+    return null;
+  }
+
+  const direct = toIsoDateTime(stripped);
+  if (direct) {
+    return direct;
+  }
+
+  const swapped = stripped.replace(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})(.*)$/, "$3-$2-$1$4");
+  const swappedIso = toIsoDateTime(swapped);
+  if (swappedIso) {
+    return swappedIso;
+  }
+
+  const noComma = stripped.replace(",", " ");
+  const noCommaIso = toIsoDateTime(noComma);
+  if (noCommaIso) {
+    return noCommaIso;
+  }
+
+  return null;
 }
 
 function normalizeDistanceMiles(value: unknown): number | null {

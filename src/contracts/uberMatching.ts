@@ -16,6 +16,14 @@ export interface UberDatasetComponentValidation {
 export interface UberMatchingValidationResult {
   ok: boolean;
   userFacingError: string | null;
+  userFacingIssueType:
+    | "none"
+    | "missing-file"
+    | "file-unreadable"
+    | "no-valid-payment-timestamps"
+    | "no-valid-trip-timestamps"
+    | "missing-required-columns"
+    | "no-overlap";
   trips: UberDatasetComponentValidation;
   payments: UberDatasetComponentValidation;
   analytics: UberDatasetComponentValidation | null;
@@ -25,6 +33,40 @@ export interface UberMatchingValidationResult {
     paymentsAnalyticsOverlap: boolean | null;
   };
   warnings: string[];
+  diagnostics: {
+    discoveredFiles: {
+      tripsFileName: string;
+      paymentsFileName: string;
+      analyticsFileName: string | null;
+      allCsvFileNames: string[];
+    };
+    trips: {
+      detectedHeaders: string[];
+      sampleRows: Array<Record<string, string>>;
+      timestampFieldUsed: string | null;
+      validTimestampCount: number;
+      validAfterFilteringCount: number;
+      sampleParsedRequestTimestamps: string[];
+    };
+    payments: {
+      detectedHeaders: string[];
+      sampleRows: Array<Record<string, string>>;
+      timestampFieldUsed: string | null;
+      tripUuidFieldUsed: string | null;
+      amountFieldUsed: string | null;
+      validTimestampCount: number;
+      validTripUuidCount: number;
+      validAfterFilteringCount: number;
+      groupsCreatedCount: number;
+      sampleParsedPaymentTimestamps: string[];
+    };
+    analytics: {
+      detectedHeaders: string[];
+      sampleRows: Array<Record<string, string>>;
+      timestampFieldUsed: string | null;
+      validTimestampCount: number;
+    } | null;
+  };
 }
 
 export interface UberPaymentClassificationTotals {
