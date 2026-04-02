@@ -59,6 +59,9 @@ export function DashboardScreen() {
   const router = useRouter();
   const pulse = useRef(new Animated.Value(0)).current;
   const areaAttemptsRef = useRef(0);
+  const alertPulse = useRef(new Animated.Value(0)).current;
+  const latestAreaLabelRef = useRef<string | null>(null);
+  const previousAlertSignatureRef = useRef<string>("none");
 
   const [session, setSession] = useState<SessionStateModel>({
     mode: "offline",
@@ -94,8 +97,20 @@ export function DashboardScreen() {
     async (options?: { suppressError?: boolean }) => {
       try {
         const [nextSession, nextMileage] = await Promise.all([getSessionState(), getBusinessMileageSummary()]);
-        setSession(nextSession);
+        const mergedSession =
+          nextSession.mode === "online" && !nextSession.currentAreaLabel && latestAreaLabelRef.current
+            ? { ...nextSession, currentAreaLabel: latestAreaLabelRef.current }
+            : nextSession;
+        setSession(mergedSession);
+        if (mergedSession.currentAreaLabel) {
+          latestAreaLabelRef.current = mergedSession.currentAreaLabel;
+        }
         setMileageSummary(nextMileage);
+        logLocation("canonical-refresh", {
+          mode: mergedSession.mode,
+          area: mergedSession.currentAreaLabel,
+          trackingActive: nextMileage.active,
+        });
       } catch {
         if (!options?.suppressError) {
           setActionMessage("Couldn't refresh session state right now.");
@@ -206,12 +221,23 @@ export function DashboardScreen() {
   }, [pulse, session.mode]);
 
   useEffect(() => {
+    if (session.currentAreaLabel) {
+      latestAreaLabelRef.current = session.currentAreaLabel;
+    }
+    logLocation("render-state-snapshot", {
+      mode: session.mode,
+      currentAreaLabel: session.currentAreaLabel,
+      latestAreaLabel: latestAreaLabelRef.current,
+    });
+  }, [session.currentAreaLabel, session.mode]);
+
+  useEffect(() => {
     if (session.mode !== "online") {
       setAreaResolutionAttempts(0);
       areaAttemptsRef.current = 0;
       setProximityAlert({
         state: "none",
-        headline: "Nothing notable around you",
+        headline: "Nothing notable to share",
         details: "No nearby monitored places are currently available for advisory checks.",
         confidence: "LOW",
         basisLabel: "Monitored place advisory (next 60 minutes)",
@@ -279,13 +305,21 @@ export function DashboardScreen() {
           return;
         }
 
-        if (label !== session.currentAreaLabel) {
+        logLocation("compare-before-persist", {
+          incomingLabel: label,
+          existingLabel: latestAreaLabelRef.current,
+        });
+        if (label !== latestAreaLabelRef.current) {
+          logLocation("persist-before", { label });
           await setCurrentAreaLabel(label);
-          logLocation("live-area-applied", { label });
+          logLocation("persist-after", { label });
           if (!active) {
             return;
           }
+          latestAreaLabelRef.current = label;
           setSession((prev) => ({ ...prev, currentAreaLabel: label }));
+          logLocation("live-area-applied", { label });
+          await refreshCanonicalState({ suppressError: true });
         }
         areaAttemptsRef.current = 0;
         setAreaResolutionAttempts(0);
@@ -310,7 +344,7 @@ export function DashboardScreen() {
       active = false;
       clearInterval(interval);
     };
-  }, [session.currentAreaLabel, session.mode]);
+  }, [refreshCanonicalState, session.mode]);
 
   useEffect(() => {
     if (session.mode !== "online") {
@@ -331,6 +365,27 @@ export function DashboardScreen() {
     const interval = setInterval(evaluate, 5 * 60 * 1000);
     return () => clearInterval(interval);
   }, [currentCoords, session.mode, trackedPlaces]);
+
+  useEffect(() => {
+    const signature = `${proximityAlert.state}|${proximityAlert.headline}|${proximityAlert.details}`;
+    const previous = previousAlertSignatureRef.current;
+    previousAlertSignatureRef.current = signature;
+
+    const shouldPulse =
+      proximityAlert.state === "alert" &&
+      previous !== "none" &&
+      signature !== previous;
+
+    if (!shouldPulse) {
+      alertPulse.setValue(0);
+      return;
+    }
+
+    Animated.sequence([
+      Animated.timing(alertPulse, { toValue: 1, duration: 260, useNativeDriver: false }),
+      Animated.timing(alertPulse, { toValue: 0, duration: 320, useNativeDriver: false }),
+    ]).start();
+  }, [alertPulse, proximityAlert.details, proximityAlert.headline, proximityAlert.state]);
 
   const onToggleSession = async () => {
     if (isToggling) {
@@ -372,10 +427,25 @@ export function DashboardScreen() {
         if (!tracking.ok && tracking.warning) {
           await setSessionMode("offline", chosenArea);
           await stopBusinessMileageTracking(chosenArea);
+          setSession((previous) => ({
+            ...previous,
+            mode: "offline",
+            businessMileageTrackingEnabled: false,
+            trackingStartedAt: null,
+          }));
           setActionMessage("Couldn't start online tracking. Stayed offline.");
         }
         await refreshCanonicalState({ suppressError: true });
+        if (tracking.ok) {
+          setActionMessage(null);
+        }
       } catch {
+        setSession((previous) => ({
+          ...previous,
+          mode: "offline",
+          businessMileageTrackingEnabled: false,
+          trackingStartedAt: null,
+        }));
         await refreshCanonicalState({ suppressError: true });
         setActionMessage("Couldn't go online right now. Please try again.");
       } finally {
@@ -492,7 +562,11 @@ export function DashboardScreen() {
           ) : (
             <View style={styles.offlineDot} />
           )}
-          <Text style={styles.statusText}>{session.mode === "online" ? `Online - ${session.currentAreaLabel ?? "Locating area"}` : "Offline"}</Text>
+          <Text style={styles.statusText}>
+            {session.mode === "online"
+              ? `Online - ${session.currentAreaLabel ?? latestAreaLabelRef.current ?? "Locating area"}`
+              : "Offline"}
+          </Text>
         </Pressable>
         <Text style={styles.statusHint}>{session.mode === "online" ? "Tap to go offline" : "Tap to go online"}</Text>
         {session.mode === "offline" ? <Text style={styles.statusHint}>Mileage tracking inactive in offline mode</Text> : null}
@@ -503,7 +577,7 @@ export function DashboardScreen() {
       {session.mode === "online" ? (
         <>
           <Card title="Current Location">
-            <KeyValueRow label="Current area" value={session.currentAreaLabel ?? "Locating area"} />
+            <KeyValueRow label="Current area" value={session.currentAreaLabel ?? latestAreaLabelRef.current ?? "Locating area"} />
             <Text style={styles.decisionHeadline}>{userFacingAction}</Text>
             <ConfidenceBadge
               evidenceLabel={evidenceLabelFromConfidence(rec.confidence)}
@@ -515,12 +589,24 @@ export function DashboardScreen() {
             <Text>{renderHighlightedTemplate(recommendedTemplate.nearbyGuidance)}</Text>
           </Card>
 
-          <Card title="Proximity Alert">
+          <Animated.View
+            style={[
+              styles.proximityAnimatedWrap,
+              {
+                backgroundColor: alertPulse.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: ["rgba(30,111,80,0)", "rgba(30,111,80,0.14)"],
+                }),
+              },
+            ]}
+          >
+            <Card title="Proximity Alert">
             <Text style={styles.proximityHeadline}>{proximityAlert.headline}</Text>
             <Text>{proximityAlert.details}</Text>
             <KeyValueRow label="Monitoring radius" value="5 miles" />
             <KeyValueRow label="Last checked" value={formatUkDateTime(proximityAlert.evaluatedAt)} />
-          </Card>
+            </Card>
+          </Animated.View>
 
           <Card title="What Usually Happens Here?">
             <KeyValueRow label="Average wait here" value={`${placeholderBeenHereBefore.averageWaitMinutes.toFixed(1)} mins`} />
@@ -724,6 +810,9 @@ const styles = StyleSheet.create({
   proximityHeadline: {
     fontWeight: "700",
     fontSize: 16,
+  },
+  proximityAnimatedWrap: {
+    borderRadius: 14,
   },
   highlightKeyword: {
     fontWeight: "700",

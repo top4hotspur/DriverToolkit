@@ -59,7 +59,7 @@ export function evaluateProximityAlert(args: {
   if (!args.currentCoords || args.trackedPlaces.length === 0) {
     return {
       state: "none",
-      headline: "Nothing notable around you",
+      headline: "Nothing notable to share",
       details: "No nearby monitored places are currently available for advisory checks.",
       confidence: "LOW",
       basisLabel: "Monitored place advisory (next 60 minutes)",
@@ -85,7 +85,7 @@ export function evaluateProximityAlert(args: {
   if (nearbyPlaces.length === 0) {
     return {
       state: "none",
-      headline: "Nothing notable around you",
+      headline: "Nothing notable to share",
       details: "No monitored airport, station, or venue is within 5 miles right now.",
       confidence: "LOW",
       basisLabel: "Monitored place advisory (next 60 minutes)",
@@ -100,7 +100,7 @@ export function evaluateProximityAlert(args: {
   if (anomalies.length === 0) {
     return {
       state: "none",
-      headline: "Nothing notable around you",
+      headline: "Nothing notable to share",
       details: "Nearby monitored places are tracking close to baseline expectations.",
       confidence: "MEDIUM",
       basisLabel: "Monitored place advisory (next 60 minutes)",
