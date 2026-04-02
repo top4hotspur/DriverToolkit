@@ -1,4 +1,4 @@
-import { useRouter } from "expo-router";
+ï»¿import { useRouter } from "expo-router";
 import { useEffect, useState } from "react";
 import { Text, TextInput, View } from "react-native";
 import { getLatestImportSummary } from "../engines/import/importPersistence";
@@ -183,9 +183,9 @@ export function SettingsScreen() {
   return (
     <ScreenShell title="Settings" subtitle="Decision controls, Favourites, compliance details, and privacy upload.">
       <Card title="Targets (Editable)">
-        <Text>Target £/hour</Text>
+        <Text>Target GBP/hour</Text>
         <TextInput value={targetHourlyInput} onChangeText={setTargetHourlyInput} style={styles.input} keyboardType="decimal-pad" />
-        <Text>Target £/mile</Text>
+        <Text>Target GBP/mile</Text>
         <TextInput value={targetMileInput} onChangeText={setTargetMileInput} style={styles.input} keyboardType="decimal-pad" />
       </Card>
 
@@ -198,6 +198,7 @@ export function SettingsScreen() {
       <Card title="Favourites">
         <Text>Set the postcodes you prefer to work from or return to between jobs.</Text>
         <Text>These are used when comparing nearby areas and start-of-shift suggestions.</Text>
+        <Text>While online, favourites may be monitored for unusually busy periods and proximity alerts.</Text>
         <TextInput value={newPostcode} onChangeText={setNewPostcode} style={styles.input} placeholder="Postcode (e.g. BT6 9LF)" />
         <TextInput value={newLabel} onChangeText={setNewLabel} style={styles.input} placeholder="Optional label" />
         <PrimaryButton label="Add favourite" onPress={addPoint} />
@@ -220,9 +221,9 @@ export function SettingsScreen() {
       <Card title="Vehicle Assumptions">
         <Text>MPG</Text>
         <TextInput value={mpgInput} onChangeText={setMpgInput} style={styles.input} keyboardType="decimal-pad" />
-        <Text>Fuel £/L</Text>
+        <Text>Fuel GBP/L</Text>
         <TextInput value={fuelInput} onChangeText={setFuelInput} style={styles.input} keyboardType="decimal-pad" />
-        <Text>Maintenance £/mile</Text>
+        <Text>Maintenance GBP/mile</Text>
         <TextInput value={maintenanceInput} onChangeText={setMaintenanceInput} style={styles.input} keyboardType="decimal-pad" />
         <Text>HMRC recommend setting this at 45p per mile.</Text>
         <Text>Fuel stays user-editable now and can later be refreshed from fuel receipts.</Text>

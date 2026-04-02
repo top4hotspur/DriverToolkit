@@ -1,4 +1,4 @@
-import { RecommendedActionContract } from "../contracts/recommendations";
+﻿import { RecommendedActionContract } from "../contracts/recommendations";
 
 export interface RecommendedActionTemplateCopy {
   areaStrength: string;
@@ -87,7 +87,7 @@ function stayGuidanceLine(tier: StayTier): string {
     case "stay-short":
       return "**Stay here** for a short period and reassess.";
     default:
-      return "**Stay here** — this area usually justifies patience.";
+      return "**Stay here** - this area usually justifies patience.";
   }
 }
 
@@ -100,6 +100,6 @@ function nearbyGuidanceLine(tier: NearbyTier, areaLabel: string): string {
     case "stay-but-lean":
       return `**Stay in this area**, but consider moving toward **${areaLabel}** if it stays quiet.`;
     default:
-      return "**Move on** — a better nearby setup is usually available.";
+      return "**Move on** - a better nearby setup is usually available.";
   }
 }

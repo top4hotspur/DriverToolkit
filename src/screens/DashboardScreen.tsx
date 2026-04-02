@@ -5,6 +5,11 @@ import { Animated, Pressable, StyleSheet, Text, View } from "react-native";
 import { GoOnlineNowDecisionContract } from "../contracts/goOnlineNow";
 import { OfflineAction } from "../contracts/tasks";
 import { BusinessMileageSummary } from "../contracts/tracking";
+import { ProximityAlertResult, TrackedPlace } from "../contracts/advisory";
+import {
+  buildTrackedPlacesFromFavourites,
+  evaluateProximityAlert,
+} from "../engines/advisory/proximityAlerts";
 import { getLatestImportSummary } from "../engines/import/importPersistence";
 import {
   getBusinessMileageSummary,
@@ -74,6 +79,16 @@ export function DashboardScreen() {
   const [isToggling, setIsToggling] = useState(false);
   const [liveNow, setLiveNow] = useState(() => Date.now());
   const [areaResolutionAttempts, setAreaResolutionAttempts] = useState(0);
+  const [currentCoords, setCurrentCoords] = useState<{ latitude: number; longitude: number } | null>(null);
+  const [trackedPlaces, setTrackedPlaces] = useState<TrackedPlace[]>([]);
+  const [proximityAlert, setProximityAlert] = useState<ProximityAlertResult>({
+    state: "none",
+    headline: "Nothing notable around you",
+    details: "No nearby monitored places are currently available for advisory checks.",
+    confidence: "LOW",
+    basisLabel: "Monitored place advisory (next 60 minutes)",
+    evaluatedAt: new Date().toISOString(),
+  });
 
   const refreshCanonicalState = useCallback(
     async (options?: { suppressError?: boolean }) => {
@@ -128,6 +143,7 @@ export function DashboardScreen() {
       await refreshCanonicalState({ suppressError: true });
       setSettings(loadedSettings);
       setStartPoints(points);
+      setTrackedPlaces(buildTrackedPlacesFromFavourites(points));
       setLatestImportToken(importToken);
       setNewAchievementResult(newAchievements);
       setOutstandingActions(actions);
@@ -152,6 +168,10 @@ export function DashboardScreen() {
       clearInterval(interval);
     };
   }, [refreshCanonicalState]);
+
+  useEffect(() => {
+    setTrackedPlaces(buildTrackedPlacesFromFavourites(startPoints));
+  }, [startPoints]);
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -189,6 +209,14 @@ export function DashboardScreen() {
     if (session.mode !== "online") {
       setAreaResolutionAttempts(0);
       areaAttemptsRef.current = 0;
+      setProximityAlert({
+        state: "none",
+        headline: "Nothing notable around you",
+        details: "No nearby monitored places are currently available for advisory checks.",
+        confidence: "LOW",
+        basisLabel: "Monitored place advisory (next 60 minutes)",
+        evaluatedAt: new Date().toISOString(),
+      });
       return;
     }
 
@@ -230,6 +258,10 @@ export function DashboardScreen() {
         }
 
         logLocation("coords-received", {
+          latitude: position.coords.latitude,
+          longitude: position.coords.longitude,
+        });
+        setCurrentCoords({
           latitude: position.coords.latitude,
           longitude: position.coords.longitude,
         });
@@ -279,6 +311,26 @@ export function DashboardScreen() {
       clearInterval(interval);
     };
   }, [session.currentAreaLabel, session.mode]);
+
+  useEffect(() => {
+    if (session.mode !== "online") {
+      return;
+    }
+
+    const evaluate = () => {
+      const next = evaluateProximityAlert({
+        now: new Date(),
+        currentCoords,
+        trackedPlaces,
+        radiusMiles: 5,
+      });
+      setProximityAlert(next);
+    };
+
+    evaluate();
+    const interval = setInterval(evaluate, 5 * 60 * 1000);
+    return () => clearInterval(interval);
+  }, [currentCoords, session.mode, trackedPlaces]);
 
   const onToggleSession = async () => {
     if (isToggling) {
@@ -450,15 +502,8 @@ export function DashboardScreen() {
 
       {session.mode === "online" ? (
         <>
-          <Card title="Current Location Context">
-            <Text>
-              {session.currentAreaLabel
-                ? `${session.currentAreaLabel} is your live working area label.`
-                : "Location is available while online once GPS resolves your current area."}
-            </Text>
-          </Card>
-
-          <Card title="Recommended Action">
+          <Card title="Current Location">
+            <KeyValueRow label="Current area" value={session.currentAreaLabel ?? "Locating area"} />
             <Text style={styles.decisionHeadline}>{userFacingAction}</Text>
             <ConfidenceBadge
               evidenceLabel={evidenceLabelFromConfidence(rec.confidence)}
@@ -468,6 +513,13 @@ export function DashboardScreen() {
             <Text>{renderHighlightedTemplate(recommendedTemplate.areaStrength)}</Text>
             <Text>{renderHighlightedTemplate(recommendedTemplate.stayGuidance)}</Text>
             <Text>{renderHighlightedTemplate(recommendedTemplate.nearbyGuidance)}</Text>
+          </Card>
+
+          <Card title="Proximity Alert">
+            <Text style={styles.proximityHeadline}>{proximityAlert.headline}</Text>
+            <Text>{proximityAlert.details}</Text>
+            <KeyValueRow label="Monitoring radius" value="5 miles" />
+            <KeyValueRow label="Last checked" value={formatUkDateTime(proximityAlert.evaluatedAt)} />
           </Card>
 
           <Card title="What Usually Happens Here?">
@@ -668,6 +720,10 @@ const styles = StyleSheet.create({
   decisionHeadline: {
     fontWeight: "700",
     fontSize: 22,
+  },
+  proximityHeadline: {
+    fontWeight: "700",
+    fontSize: 16,
   },
   highlightKeyword: {
     fontWeight: "700",
