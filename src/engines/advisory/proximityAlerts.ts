@@ -1,11 +1,21 @@
 import {
   BaselineHourlyExpectation,
-  DiaryAdvisoryEntry,
   LiveArrivalAnomaly,
   ProximityAlertResult,
   TrackedPlace,
   TrackedPlaceType,
 } from "../../contracts/advisory";
+import {
+  AirportArrivalAnomaly,
+  DayAnomaly,
+  DiaryDay,
+  DiaryDayPlan,
+  DiaryPlannerOutput,
+  DiarySourceAnchor,
+  OpportunityWindow,
+  TransportDisruptionAnomaly,
+  WeatherAnomaly,
+} from "../../contracts/diary";
 import { StartPoint } from "../../state/startPointTypes";
 
 const SEEDED_TRACKED_PLACES: TrackedPlace[] = [
@@ -33,6 +43,14 @@ const SEEDED_TRACKED_PLACES: TrackedPlace[] = [
     longitude: -5.9197,
     source: "seeded",
   },
+  {
+    id: "seeded-sse",
+    label: "SSE Arena",
+    type: "venue",
+    latitude: 54.6032,
+    longitude: -5.9159,
+    source: "seeded",
+  },
 ];
 
 export function buildTrackedPlacesFromFavourites(favourites: StartPoint[]): TrackedPlace[] {
@@ -47,6 +65,40 @@ export function buildTrackedPlacesFromFavourites(favourites: StartPoint[]): Trac
   }));
 
   return [...fromFavourites, ...SEEDED_TRACKED_PLACES];
+}
+
+export function buildDiaryPlanner(args: {
+  now: Date;
+  trackedPlaces: TrackedPlace[];
+  days?: number;
+}): DiaryPlannerOutput {
+  const dayCount = Math.max(1, Math.min(args.days ?? 7, 7));
+  const sourceAnchors: DiarySourceAnchor[] = args.trackedPlaces.map((place) => ({
+    id: place.id,
+    label: place.label,
+    type: mapPlaceTypeToAnchorType(place.type, place.source),
+    source: place.source,
+    latitude: place.latitude,
+    longitude: place.longitude,
+    relatedFavouriteId: place.relatedFavouriteId ?? null,
+  }));
+
+  const days: DiaryDayPlan[] = [];
+  for (let index = 0; index < dayCount; index += 1) {
+    const date = startOfDay(addDays(args.now, index));
+    const day = toDiaryDay(date, index);
+    const anomalies = buildDayAnomalies({ date, trackedPlaces: args.trackedPlaces });
+    const opportunities = buildOpportunityWindows({ date, trackedPlaces: args.trackedPlaces });
+    days.push({ day, anomalies, opportunities });
+  }
+
+  return {
+    generatedAt: args.now.toISOString(),
+    basisLabel:
+      "7-day rolling planner from favourites + monitored anchors with weather/disruption anomaly layering.",
+    sourceAnchors,
+    days,
+  };
 }
 
 export function evaluateProximityAlert(args: {
@@ -122,31 +174,141 @@ export function evaluateProximityAlert(args: {
   };
 }
 
-export function buildDiaryAdvisories(args: {
-  now: Date;
-  trackedPlaces: TrackedPlace[];
-}): DiaryAdvisoryEntry[] {
-  const advisories = args.trackedPlaces.slice(0, 5).map((place, index) => {
-    const baseline = getBaselineExpectation(place.id, args.now);
-    const nextHour = simulateNextHourArrivals(place, args.now);
-    const confidence: DiaryAdvisoryEntry["confidence"] = nextHour >= baseline.expectedArrivalsNextHour + 2 ? "HIGH" : "MEDIUM";
+function buildDayAnomalies(args: { date: Date; trackedPlaces: TrackedPlace[] }): DayAnomaly[] {
+  const weather = buildWeatherAnomaly(args.date, args.trackedPlaces[0]);
+  const transport = buildTransportAnomaly(args.date, args.trackedPlaces);
+  const airport = buildAirportAnomaly(args.date, args.trackedPlaces);
+
+  return [weather, transport, airport]
+    .filter((entry): entry is DayAnomaly => entry !== null)
+    .sort((a, b) => new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime());
+}
+
+function buildOpportunityWindows(args: { date: Date; trackedPlaces: TrackedPlace[] }): OpportunityWindow[] {
+  const anchors = args.trackedPlaces.slice(0, Math.min(args.trackedPlaces.length, 6));
+  const opportunities = anchors.map((place, index) => {
+    const hourSeed = (seedFromId(place.id) + args.date.getDay() + index * 3) % 14;
+    const startHour = 7 + hourSeed;
+    const durationHours = place.type === "venue" ? 1 : 2;
+    const startsAt = atHour(args.date, startHour);
+    const endsAt = atHour(args.date, Math.min(startHour + durationHours, 23));
+    const baseline = getBaselineExpectation(place.id, startsAt);
+    const nextHourArrivals = simulateNextHourArrivals(place, startsAt);
+    const confidence: OpportunityWindow["confidence"] =
+      nextHourArrivals >= baseline.expectedArrivalsNextHour + 2 ? "HIGH" : "MEDIUM";
 
     return {
-      id: `diary-${place.id}-${index}`,
-      title: `${place.label} advisory`,
-      window: `${args.now.getHours().toString().padStart(2, "0")}:00-${(args.now.getHours() + 1)
-        .toString()
-        .padStart(2, "0")}:00`,
-      note:
-        nextHour > baseline.expectedArrivalsNextHour
-          ? `${place.label} is above usual activity for this hour.`
-          : `${place.label} is around normal activity for this hour.`,
+      id: `opp-${place.id}-${args.date.toISOString()}`,
+      startsAt: startsAt.toISOString(),
+      endsAt: endsAt.toISOString(),
+      anchorId: place.id,
+      anchorLabel: place.label,
+      anchorType: mapPlaceTypeToAnchorType(place.type, place.source),
       confidence,
-      relatedTrackedPlaceId: place.id,
+      title: buildOpportunityTitle(place),
+      detail: buildOpportunityDetail(place, nextHourArrivals, baseline.expectedArrivalsNextHour),
     };
   });
 
-  return advisories;
+  return opportunities.sort((a, b) => new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime());
+}
+
+function buildWeatherAnomaly(date: Date, anchor: TrackedPlace | undefined): WeatherAnomaly | null {
+  const seed = seedFromId(`${date.toISOString().slice(0, 10)}-weather`);
+  if (seed % 3 !== 0) {
+    return null;
+  }
+
+  const startsAt = atHour(date, 12);
+  const endsAt = atHour(date, 14);
+  const severity: WeatherAnomaly["severity"] = seed % 2 === 0 ? "warning" : "info";
+
+  return {
+    id: `weather-${date.toISOString().slice(0, 10)}`,
+    type: "weather",
+    severity,
+    areaLabel: anchor?.label ?? "Your monitored area",
+    startsAt: startsAt.toISOString(),
+    endsAt: endsAt.toISOString(),
+    message: `Weather warning for rain detected ${formatHourWindow(startsAt, endsAt)}.`,
+  };
+}
+
+function buildTransportAnomaly(date: Date, trackedPlaces: TrackedPlace[]): TransportDisruptionAnomaly | null {
+  const station = trackedPlaces.find((place) => place.type === "station");
+  if (!station) {
+    return null;
+  }
+
+  const seed = seedFromId(`${station.id}-${date.getDay()}-transport`);
+  if (seed % 4 !== 0) {
+    return null;
+  }
+
+  const startsAt = atHour(date, 10);
+  const endsAt = atHour(date, 16);
+  return {
+    id: `transport-${station.id}-${date.toISOString().slice(0, 10)}`,
+    type: "transport-disruption",
+    severity: "warning",
+    networkLabel: `${station.label} rail corridor`,
+    startsAt: startsAt.toISOString(),
+    endsAt: endsAt.toISOString(),
+    message: `${station.label} engineering works expected - replacement bus service likely during ${formatHourWindow(startsAt, endsAt)}.`,
+  };
+}
+
+function buildAirportAnomaly(date: Date, trackedPlaces: TrackedPlace[]): AirportArrivalAnomaly | null {
+  const airport = trackedPlaces.find((place) => place.type === "airport");
+  if (!airport) {
+    return null;
+  }
+
+  const baseline = getBaselineExpectation(airport.id, atHour(date, 9));
+  const arrivals = simulateNextHourArrivals(airport, atHour(date, 9));
+  if (arrivals <= baseline.expectedArrivalsNextHour) {
+    return null;
+  }
+
+  const delayedArrivals = simulateDelayedFlights(airport, date, arrivals);
+  const startsAt = atHour(date, 9);
+  const endsAt = atHour(date, 10);
+
+  const delayedText = delayedArrivals.length > 0
+    ? ` ${delayedArrivals.length} delayed arrivals expected.`
+    : "";
+
+  return {
+    id: `airport-${airport.id}-${date.toISOString().slice(0, 10)}`,
+    type: "airport-arrival",
+    severity: delayedArrivals.length > 0 ? "high" : "info",
+    airportLabel: airport.label,
+    startsAt: startsAt.toISOString(),
+    endsAt: endsAt.toISOString(),
+    expectedArrivals: arrivals,
+    delayedArrivals,
+    message: `${arrivals} flights due into ${shortCode(airport.label)} in the next hour.${delayedText}`,
+  };
+}
+
+function buildOpportunityTitle(place: TrackedPlace): string {
+  if (place.type === "airport") {
+    return `${shortCode(place.label)} arrivals above baseline`;
+  }
+  if (place.type === "station") {
+    return `${place.label} passenger flow window`;
+  }
+  return `${place.label} event release window`;
+}
+
+function buildOpportunityDetail(place: TrackedPlace, arrivals: number, baseline: number): string {
+  if (place.type === "airport") {
+    return `Higher than average number of flights arriving (${arrivals} vs ${baseline} baseline).`;
+  }
+  if (place.type === "station") {
+    return `Commuter and interchange flow is typically stronger than baseline in this block.`;
+  }
+  return `Likely end-of-event pickup window based on monitored venue timing.`;
 }
 
 function evaluatePlaceAnomaly(place: TrackedPlace, now: Date): LiveArrivalAnomaly | null {
@@ -272,6 +434,59 @@ function simulateDelayedFlights(place: TrackedPlace, now: Date, nextHourArrivals
     delays.push({ serviceId: `${shortCode(place.label)}-B`, delayMinutes: maybeSecondDelay });
   }
   return delays;
+}
+
+function mapPlaceTypeToAnchorType(type: TrackedPlaceType, source: TrackedPlace["source"]): DiarySourceAnchor["type"] {
+  if (source === "favourite") {
+    return "favourite";
+  }
+  return type;
+}
+
+function toDiaryDay(date: Date, index: number): DiaryDay {
+  const selectorLabel =
+    index === 0
+      ? "Today"
+      : index === 1
+        ? "Tomorrow"
+        : date.toLocaleDateString("en-GB", { weekday: "short", day: "2-digit" });
+
+  return {
+    dateIso: date.toISOString(),
+    dayLabel: date.toLocaleDateString("en-GB", {
+      weekday: "long",
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+    }),
+    selectorLabel,
+    isToday: index === 0,
+    isTomorrow: index === 1,
+  };
+}
+
+function atHour(date: Date, hour: number): Date {
+  const value = new Date(date);
+  value.setHours(hour, 0, 0, 0);
+  return value;
+}
+
+function startOfDay(date: Date): Date {
+  const value = new Date(date);
+  value.setHours(0, 0, 0, 0);
+  return value;
+}
+
+function addDays(date: Date, days: number): Date {
+  const value = new Date(date);
+  value.setDate(value.getDate() + days);
+  return value;
+}
+
+function formatHourWindow(startsAt: Date, endsAt: Date): string {
+  const start = startsAt.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", hour12: false });
+  const end = endsAt.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", hour12: false });
+  return `${start} to ${end}`;
 }
 
 function seedFromId(id: string): number {

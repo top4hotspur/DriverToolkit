@@ -1,22 +1,15 @@
-import { DiaryAdvisoryEntry } from "../contracts/advisory";
-import { buildDiaryAdvisories, buildTrackedPlacesFromFavourites } from "../engines/advisory/proximityAlerts";
+import { DiaryPlannerOutput } from "../contracts/diary";
+import { buildDiaryPlanner, buildTrackedPlacesFromFavourites } from "../engines/advisory/proximityAlerts";
 import { StartPoint } from "../state/startPointTypes";
 
-export function buildSmartDiaryFromFavourites(args: {
+export function buildSmartDiaryPlanner(args: {
   favourites: StartPoint[];
   now: Date;
-}): {
-  basisLabel: string;
-  entries: DiaryAdvisoryEntry[];
-} {
+}): DiaryPlannerOutput {
   const trackedPlaces = buildTrackedPlacesFromFavourites(args.favourites);
-  const entries = buildDiaryAdvisories({
+  return buildDiaryPlanner({
     now: args.now,
     trackedPlaces,
+    days: 7,
   });
-
-  return {
-    basisLabel: "Favourites + monitored places (day/hour baseline with event-aware advisory scaffolding)",
-    entries,
-  };
 }

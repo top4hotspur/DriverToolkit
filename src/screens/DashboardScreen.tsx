@@ -309,16 +309,24 @@ export function DashboardScreen() {
           incomingLabel: label,
           existingLabel: latestAreaLabelRef.current,
         });
-        if (label !== latestAreaLabelRef.current) {
+
+        const shouldPersist = label !== latestAreaLabelRef.current;
+        latestAreaLabelRef.current = label;
+        setSession((prev) => {
+          if (prev.currentAreaLabel === label) {
+            return prev;
+          }
+          return { ...prev, currentAreaLabel: label };
+        });
+        logLocation("live-area-applied", { label, shouldPersist });
+
+        if (shouldPersist) {
           logLocation("persist-before", { label });
           await setCurrentAreaLabel(label);
           logLocation("persist-after", { label });
           if (!active) {
             return;
           }
-          latestAreaLabelRef.current = label;
-          setSession((prev) => ({ ...prev, currentAreaLabel: label }));
-          logLocation("live-area-applied", { label });
           await refreshCanonicalState({ suppressError: true });
         }
         areaAttemptsRef.current = 0;

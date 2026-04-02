@@ -199,6 +199,7 @@ export function SettingsScreen() {
         <Text>Set the postcodes you prefer to work from or return to between jobs.</Text>
         <Text>These are used when comparing nearby areas and start-of-shift suggestions.</Text>
         <Text>While online, favourites may be monitored for unusually busy periods and proximity alerts.</Text>
+        <Text>They also anchor Smart Diary opportunity and disruption planning windows.</Text>
         <TextInput value={newPostcode} onChangeText={setNewPostcode} style={styles.input} placeholder="Postcode (e.g. BT6 9LF)" />
         <TextInput value={newLabel} onChangeText={setNewLabel} style={styles.input} placeholder="Optional label" />
         <PrimaryButton label="Add favourite" onPress={addPoint} />
