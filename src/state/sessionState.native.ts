@@ -27,7 +27,7 @@ export async function getSessionState(): Promise<SessionStateModel> {
       WHERE id = ?
     `, [SESSION_ID]);
 
-    return {
+    const state = {
       mode: row?.mode ?? "offline",
       currentAreaLabel: row?.currentAreaLabel ?? null,
       trackingStartedAt: row?.trackingStartedAt ?? null,
@@ -35,6 +35,8 @@ export async function getSessionState(): Promise<SessionStateModel> {
       businessMileageTrackingEnabled: (row?.businessMileageTrackingEnabled ?? 0) === 1,
       accumulatedOnlineSeconds: Math.floor(row?.accumulatedOnlineSeconds ?? 0),
     };
+    logSessionState("get-session-state", state);
+    return state;
   } catch {
     const legacy = await db.getFirstAsync<{
       mode: SessionMode;
@@ -53,7 +55,7 @@ export async function getSessionState(): Promise<SessionStateModel> {
       WHERE id = ?
     `, [SESSION_ID]);
 
-    return {
+    const state = {
       mode: legacy?.mode ?? "offline",
       currentAreaLabel: legacy?.currentAreaLabel ?? null,
       trackingStartedAt: legacy?.trackingStartedAt ?? null,
@@ -61,6 +63,8 @@ export async function getSessionState(): Promise<SessionStateModel> {
       businessMileageTrackingEnabled: (legacy?.businessMileageTrackingEnabled ?? 0) === 1,
       accumulatedOnlineSeconds: 0,
     };
+    logSessionState("get-session-state-legacy", state);
+    return state;
   }
 }
 
@@ -71,6 +75,10 @@ export async function setSessionMode(mode: SessionMode, areaLabel: string | null
   await ensureSessionHistoryTable();
 
   const previous = await getSessionState();
+  logSessionState("set-session-mode-before", previous, {
+    targetMode: mode,
+    targetAreaLabel: areaLabel,
+  });
   const now = new Date();
   const nowIso = now.toISOString();
   const enabled = mode === "online" ? 1 : 0;
@@ -84,19 +92,16 @@ export async function setSessionMode(mode: SessionMode, areaLabel: string | null
   const nextTrackingStartedAt = mode === "online" ? nowIso : null;
   const nextTrackingStoppedAt = mode === "offline" ? nowIso : previous.trackingStoppedAt;
 
-  await db.runAsync(
-    `
-      UPDATE session_state
-      SET mode = ?,
-          current_area_label = ?,
-          tracking_started_at = ?,
-          tracking_stopped_at = ?,
-          business_mileage_tracking_enabled = ?,
-          accumulated_online_seconds = ?,
-          updated_at = ?
-      WHERE id = ?
-    `,
-    [mode, areaLabel, nextTrackingStartedAt, nextTrackingStoppedAt, enabled, 0, nowIso, SESSION_ID],
+  await updateSessionState(
+    {
+      mode,
+      currentAreaLabel: areaLabel,
+      trackingStartedAt: nextTrackingStartedAt,
+      trackingStoppedAt: nextTrackingStoppedAt,
+      businessMileageTrackingEnabled: enabled === 1,
+      accumulatedOnlineSeconds: 0,
+    },
+    "set-session-mode",
   );
 
   if (completedSessionSeconds > 0 && previous.trackingStartedAt) {
@@ -118,20 +123,68 @@ export async function setSessionMode(mode: SessionMode, areaLabel: string | null
     );
   }
 
-  return getSessionState();
+  const next = await getSessionState();
+  logSessionState("set-session-mode-after", next, {
+    targetMode: mode,
+    targetAreaLabel: areaLabel,
+  });
+  return next;
 }
 
 export async function setCurrentAreaLabel(areaLabel: string | null): Promise<void> {
+  const before = await getSessionState();
+  logSessionState("set-current-area-before", before, {
+    targetAreaLabel: areaLabel,
+  });
+  await updateSessionState(
+    {
+      currentAreaLabel: areaLabel,
+    },
+    "set-current-area-label",
+  );
+  const after = await getSessionState();
+  logSessionState("set-current-area-after", after, {
+    targetAreaLabel: areaLabel,
+  });
+}
+
+export async function updateSessionState(
+  patch: Partial<SessionStateModel>,
+  reason = "patch",
+): Promise<SessionStateModel> {
   const db = await getDb();
   await ensureSessionRow();
+  const previous = await getSessionState();
+  const next: SessionStateModel = {
+    ...previous,
+    ...patch,
+  };
+  const nowIso = new Date().toISOString();
   await db.runAsync(
     `
       UPDATE session_state
-      SET current_area_label = ?, updated_at = ?
+      SET mode = ?,
+          current_area_label = ?,
+          tracking_started_at = ?,
+          tracking_stopped_at = ?,
+          business_mileage_tracking_enabled = ?,
+          accumulated_online_seconds = ?,
+          updated_at = ?
       WHERE id = ?
     `,
-    [areaLabel, new Date().toISOString(), SESSION_ID],
+    [
+      next.mode,
+      next.currentAreaLabel,
+      next.trackingStartedAt,
+      next.trackingStoppedAt,
+      next.businessMileageTrackingEnabled ? 1 : 0,
+      next.accumulatedOnlineSeconds,
+      nowIso,
+      SESSION_ID,
+    ],
   );
+  logSessionState("update-session-state", next, { reason });
+  return next;
 }
 
 async function ensureSessionColumns(): Promise<void> {
@@ -141,6 +194,18 @@ async function ensureSessionColumns(): Promise<void> {
   if (!names.has("accumulated_online_seconds")) {
     await db.execAsync(`ALTER TABLE session_state ADD COLUMN accumulated_online_seconds REAL DEFAULT 0`);
   }
+}
+
+function logSessionState(event: string, state: SessionStateModel, extras?: Record<string, unknown>): void {
+  console.log(`[DT][session] ${event}`, {
+    ...extras,
+    mode: state.mode,
+    currentAreaLabel: state.currentAreaLabel,
+    trackingStartedAt: state.trackingStartedAt,
+    trackingStoppedAt: state.trackingStoppedAt,
+    businessMileageTrackingEnabled: state.businessMileageTrackingEnabled,
+    accumulatedOnlineSeconds: state.accumulatedOnlineSeconds,
+  });
 }
 
 async function ensureSessionHistoryTable(): Promise<void> {

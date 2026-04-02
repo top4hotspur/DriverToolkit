@@ -97,18 +97,22 @@ export function DashboardScreen() {
     async (options?: { suppressError?: boolean }) => {
       try {
         const [nextSession, nextMileage] = await Promise.all([getSessionState(), getBusinessMileageSummary()]);
-        const mergedSession =
-          nextSession.mode === "online" && !nextSession.currentAreaLabel
-            ? nextSession
-            : nextSession;
-        setSession(mergedSession);
-        if (mergedSession.currentAreaLabel) {
-          latestAreaLabelRef.current = mergedSession.currentAreaLabel;
+        logLocation("canonical-refresh-loaded", {
+          mode: nextSession.mode,
+          currentAreaLabel: nextSession.currentAreaLabel,
+          trackingStartedAt: nextSession.trackingStartedAt,
+          trackingStoppedAt: nextSession.trackingStoppedAt,
+          businessMileageTrackingEnabled: nextSession.businessMileageTrackingEnabled,
+          accumulatedOnlineSeconds: nextSession.accumulatedOnlineSeconds,
+        });
+        setSession(nextSession);
+        if (nextSession.currentAreaLabel) {
+          latestAreaLabelRef.current = nextSession.currentAreaLabel;
         }
         setMileageSummary(nextMileage);
         logLocation("canonical-refresh", {
-          mode: mergedSession.mode,
-          area: mergedSession.currentAreaLabel,
+          mode: nextSession.mode,
+          area: nextSession.currentAreaLabel,
           trackingActive: nextMileage.active,
         });
       } catch {
@@ -311,13 +315,10 @@ export function DashboardScreen() {
         });
 
         latestAreaLabelRef.current = label;
-        setSession((prev) => {
-          if (prev.currentAreaLabel === label) {
-            return prev;
-          }
-          return { ...prev, currentAreaLabel: label };
+        logLocation("live-area-applied", {
+          resolvedLabel: label,
+          persistedBeforeWrite: session.currentAreaLabel,
         });
-        logLocation("live-area-applied", { label });
 
         logLocation("persist-before", { label });
         await setCurrentAreaLabel(label);
@@ -350,7 +351,7 @@ export function DashboardScreen() {
       active = false;
       clearInterval(interval);
     };
-  }, [refreshCanonicalState, session.mode]);
+  }, [refreshCanonicalState, session.currentAreaLabel, session.mode]);
 
   useEffect(() => {
     if (session.mode !== "online") {
@@ -418,67 +419,64 @@ export function DashboardScreen() {
       }
 
       const chosenArea = startPoints[0]?.outwardCode ?? startPoints[0]?.postcode ?? session.currentAreaLabel ?? null;
-      setSession((previous) => ({
-        ...previous,
-        mode: "online",
-        currentAreaLabel: chosenArea ?? previous.currentAreaLabel,
-        trackingStartedAt: nowIso,
-        businessMileageTrackingEnabled: true,
-      }));
+      logLocation("toggle-online-before-persist", {
+        chosenArea,
+        mode: session.mode,
+        currentAreaLabel: session.currentAreaLabel,
+      });
 
       try {
-        await setSessionMode("online", chosenArea);
+        const persistedOnline = await setSessionMode("online", chosenArea);
+        logLocation("toggle-online-after-persist", {
+          mode: persistedOnline.mode,
+          currentAreaLabel: persistedOnline.currentAreaLabel,
+          trackingStartedAt: persistedOnline.trackingStartedAt,
+        });
+        setSession(persistedOnline);
 
         const tracking = await startBusinessMileageTracking(chosenArea);
+        logLocation("toggle-online-tracking-result", {
+          ok: tracking.ok,
+          warning: tracking.warning ?? null,
+        });
         if (!tracking.ok && tracking.warning) {
-          await setSessionMode("offline", chosenArea);
-          await stopBusinessMileageTracking(chosenArea);
-          setSession((previous) => ({
-            ...previous,
-            mode: "offline",
-            businessMileageTrackingEnabled: false,
-            trackingStartedAt: null,
-          }));
-          setActionMessage("Couldn't start online tracking. Stayed offline.");
-          await refreshCanonicalState({ suppressError: true });
-          setIsToggling(false);
+          await rollbackToOffline({
+            reason: "tracking-start-failed",
+            areaLabel: chosenArea,
+            userMessage: "Couldn't start online tracking. Stayed offline.",
+          });
           return;
         }
         await refreshCanonicalState({ suppressError: true });
         if (tracking.ok) {
           setActionMessage(null);
         }
-      } catch {
-        await setSessionMode("offline", chosenArea).catch(() => {
-          // Best effort rollback.
+      } catch (error) {
+        await rollbackToOffline({
+          reason: "online-transition-catch",
+          areaLabel: chosenArea,
+          userMessage: "Couldn't go online right now. Please try again.",
+          error: error instanceof Error ? error.message : "unknown error",
         });
-        await stopBusinessMileageTracking(chosenArea).catch(() => {
-          // Best effort rollback.
-        });
-        setSession((previous) => ({
-          ...previous,
-          mode: "offline",
-          businessMileageTrackingEnabled: false,
-          trackingStartedAt: null,
-          currentAreaLabel: null,
-        }));
-        await refreshCanonicalState({ suppressError: true });
-        setActionMessage("Couldn't go online right now. Please try again.");
       } finally {
         setIsToggling(false);
       }
       return;
     }
 
-    setSession((previous) => ({
-      ...previous,
-      mode: "offline",
-      trackingStoppedAt: nowIso,
-      businessMileageTrackingEnabled: false,
-    }));
+    logLocation("toggle-offline-before-persist", {
+      mode: session.mode,
+      currentAreaLabel: session.currentAreaLabel,
+      nowIso,
+    });
 
     try {
-      await setSessionMode("offline", session.currentAreaLabel);
+      const persistedOffline = await setSessionMode("offline", session.currentAreaLabel);
+      logLocation("toggle-offline-after-persist", {
+        mode: persistedOffline.mode,
+        currentAreaLabel: persistedOffline.currentAreaLabel,
+        trackingStoppedAt: persistedOffline.trackingStoppedAt,
+      });
       await stopBusinessMileageTracking(session.currentAreaLabel);
       await refreshCanonicalState({ suppressError: true });
       setGoOnlineDecision(null);
@@ -488,6 +486,31 @@ export function DashboardScreen() {
     } finally {
       setIsToggling(false);
     }
+  };
+
+  const rollbackToOffline = async (args: {
+    reason: string;
+    areaLabel: string | null;
+    userMessage: string;
+    error?: string;
+  }) => {
+    logLocation("rollback-offline-triggered", {
+      reason: args.reason,
+      areaLabel: args.areaLabel,
+      error: args.error ?? null,
+    });
+    await setSessionMode("offline", args.areaLabel).catch(() => {
+      logLocation("rollback-offline-persist-failed", {
+        reason: args.reason,
+      });
+    });
+    await stopBusinessMileageTracking(args.areaLabel).catch(() => {
+      logLocation("rollback-offline-stop-tracking-failed", {
+        reason: args.reason,
+      });
+    });
+    await refreshCanonicalState({ suppressError: true });
+    setActionMessage(args.userMessage);
   };
 
   const onShouldGoOnlineNow = async () => {

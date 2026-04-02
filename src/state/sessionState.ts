@@ -18,6 +18,7 @@ const completedOnlineSessions: Array<{
 }> = [];
 
 export async function getSessionState(): Promise<SessionStateModel> {
+  logSessionState("get-session-state", state);
   return state;
 }
 
@@ -39,21 +40,53 @@ export async function setSessionMode(mode: SessionMode, areaLabel: string | null
     }
   }
 
-  state = {
-    ...state,
-    mode,
-    currentAreaLabel: areaLabel,
-    trackingStartedAt: mode === "online" ? nowIso : null,
-    trackingStoppedAt: mode === "offline" ? nowIso : state.trackingStoppedAt,
-    businessMileageTrackingEnabled: mode === "online",
-    accumulatedOnlineSeconds: 0,
-  };
+  state = await updateSessionState(
+    {
+      mode,
+      currentAreaLabel: areaLabel,
+      trackingStartedAt: mode === "online" ? nowIso : null,
+      trackingStoppedAt: mode === "offline" ? nowIso : state.trackingStoppedAt,
+      businessMileageTrackingEnabled: mode === "online",
+      accumulatedOnlineSeconds: 0,
+    },
+    "set-session-mode",
+  );
+  logSessionState("set-session-mode-after", state, {
+    targetMode: mode,
+    targetAreaLabel: areaLabel,
+  });
   return state;
 }
 
 export async function setCurrentAreaLabel(areaLabel: string | null): Promise<void> {
+  state = await updateSessionState(
+    {
+      currentAreaLabel: areaLabel,
+    },
+    "set-current-area-label",
+  );
+}
+
+export async function updateSessionState(
+  patch: Partial<SessionStateModel>,
+  reason = "patch",
+): Promise<SessionStateModel> {
   state = {
     ...state,
-    currentAreaLabel: areaLabel,
+    ...patch,
   };
+  logSessionState("update-session-state", state, { reason });
+  return state;
+}
+
+function logSessionState(event: string, session: SessionStateModel, extras?: Record<string, unknown>): void {
+  console.log(`[DT][session] ${event}`, {
+    ...extras,
+    mode: session.mode,
+    currentAreaLabel: session.currentAreaLabel,
+    trackingStartedAt: session.trackingStartedAt,
+    trackingStoppedAt: session.trackingStoppedAt,
+    businessMileageTrackingEnabled: session.businessMileageTrackingEnabled,
+    accumulatedOnlineSeconds: session.accumulatedOnlineSeconds,
+  });
 }
