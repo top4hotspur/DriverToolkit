@@ -61,7 +61,7 @@ export function DashboardScreen() {
   const areaAttemptsRef = useRef(0);
   const alertPulse = useRef(new Animated.Value(0)).current;
   const latestAreaLabelRef = useRef<string | null>(null);
-  const previousAlertSignatureRef = useRef<string>("none");
+  const previousAlertSnapshotRef = useRef<MeaningfulAlertSnapshot | null>(null);
 
   const [session, setSession] = useState<SessionStateModel>({
     mode: "offline",
@@ -86,7 +86,7 @@ export function DashboardScreen() {
   const [trackedPlaces, setTrackedPlaces] = useState<TrackedPlace[]>([]);
   const [proximityAlert, setProximityAlert] = useState<ProximityAlertResult>({
     state: "none",
-    headline: "Nothing notable around you",
+    headline: "Nothing notable to share",
     details: "No nearby monitored places are currently available for advisory checks.",
     confidence: "LOW",
     basisLabel: "Monitored place advisory (next 60 minutes)",
@@ -374,15 +374,12 @@ export function DashboardScreen() {
   }, [currentCoords, session.mode, trackedPlaces]);
 
   useEffect(() => {
-    const signature = `${proximityAlert.state}|${proximityAlert.headline}|${proximityAlert.details}`;
-    const previous = previousAlertSignatureRef.current;
-    previousAlertSignatureRef.current = signature;
+    const currentSnapshot = toMeaningfulAlertSnapshot(proximityAlert);
+    const previousSnapshot = previousAlertSnapshotRef.current;
+    previousAlertSnapshotRef.current = currentSnapshot;
 
-    const shouldPulse =
-      proximityAlert.state === "alert" &&
-      previous !== "none" &&
-      signature !== previous;
-
+    const changeType = getMeaningfulAlertChangeType(previousSnapshot, currentSnapshot);
+    const shouldPulse = changeType === "appeared" || changeType === "updated";
     if (!shouldPulse) {
       alertPulse.setValue(0);
       return;
@@ -392,7 +389,7 @@ export function DashboardScreen() {
       Animated.timing(alertPulse, { toValue: 1, duration: 260, useNativeDriver: false }),
       Animated.timing(alertPulse, { toValue: 0, duration: 320, useNativeDriver: false }),
     ]).start();
-  }, [alertPulse, proximityAlert.details, proximityAlert.headline, proximityAlert.state]);
+  }, [alertPulse, proximityAlert]);
 
   const onToggleSession = async () => {
     if (isToggling) {
@@ -801,6 +798,58 @@ function renderHighlightedTemplate(template: string) {
 
 function logLocation(event: string, payload: Record<string, unknown>): void {
   console.log(`[DT][location] ${event}`, payload);
+}
+
+type MeaningfulAlertSnapshot = {
+  state: "none" | "alert";
+  trackedPlaceId: string | null;
+  headline: string;
+  details: string;
+};
+
+type AlertChangeType = "none" | "appeared" | "updated" | "cleared";
+
+function toMeaningfulAlertSnapshot(alert: ProximityAlertResult): MeaningfulAlertSnapshot {
+  return {
+    state: alert.state,
+    trackedPlaceId: alert.trackedPlaceId ?? null,
+    headline: normalizeAlertText(alert.headline),
+    details: normalizeAlertText(alert.details),
+  };
+}
+
+function getMeaningfulAlertChangeType(
+  previous: MeaningfulAlertSnapshot | null,
+  current: MeaningfulAlertSnapshot,
+): AlertChangeType {
+  if (!previous) {
+    return current.state === "alert" ? "appeared" : "none";
+  }
+
+  if (previous.state === "none" && current.state === "alert") {
+    return "appeared";
+  }
+
+  if (previous.state === "alert" && current.state === "none") {
+    return "cleared";
+  }
+
+  if (current.state === "alert") {
+    const changed =
+      previous.trackedPlaceId !== current.trackedPlaceId ||
+      previous.headline !== current.headline ||
+      previous.details !== current.details;
+
+    if (changed) {
+      return "updated";
+    }
+  }
+
+  return "none";
+}
+
+function normalizeAlertText(value: string): string {
+  return value.trim().replace(/\s+/g, " ").toLowerCase();
 }
 
 const styles = StyleSheet.create({
