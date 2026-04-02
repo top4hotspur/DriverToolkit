@@ -1,61 +1,71 @@
 import * as DocumentPicker from "expo-document-picker";
-import * as FileSystem from "expo-file-system/legacy";
 import { useRouter } from "expo-router";
 import { useEffect, useState } from "react";
 import { Text, View } from "react-native";
-import { initDatabase } from "../db/schema";
-import { ImportResult, UploadStatusViewModel } from "../domain/importTypes";
-import { ImportFileDescriptor } from "../engines/import/adapters";
-import { getLatestImportSummary } from "../engines/import/importPersistence";
-import { importUberPrivacyZip } from "../engines/import/importUberPrivacyZip";
+import { ImportStatusResponse } from "../contracts/cloudStorage";
+import { UploadStatusViewModel } from "../domain/importTypes";
+import {
+  confirmImportUpload,
+  createImportSession,
+  getImportStatus,
+  uploadZipToS3,
+} from "../engines/cloud/importSync";
 import { NewAchievementDetectionResult } from "../contracts/newAchievements";
 import { detectNewAchievementsAfterImport } from "../presentation/newAchievements";
 import { createIdleUploadStatus, uploadStatusCopy } from "../presentation/placeholderUpload";
-import { queuePrivacyImportFileMetadata } from "../state/cloudFileState";
 import { Card, PrimaryButton, ScreenShell } from "./ui";
+
+const DEFAULT_USER_ID = "local-user";
 
 export function UploadScreen() {
   const router = useRouter();
   const [status, setStatus] = useState<UploadStatusViewModel>(createIdleUploadStatus());
-  const [latestSummary, setLatestSummary] = useState<{
-    sourceFileName: string;
-    importedAt: string;
-    recordCount: number;
-    dataStartAt: string | null;
-    dataEndAt: string | null;
-  } | null>(null);
+  const [latestSummary, setLatestSummary] = useState<ImportStatusResponse | null>(null);
   const [newAchievements, setNewAchievements] = useState<NewAchievementDetectionResult | null>(null);
+  const [activeImportId, setActiveImportId] = useState<string | null>(null);
 
   useEffect(() => {
-    let mounted = true;
-
-    async function loadLatest() {
-      await initDatabase();
-      const summary = await getLatestImportSummary();
-      if (!mounted || !summary) {
-        return;
-      }
-
-      setLatestSummary({
-        sourceFileName: summary.sourceFileName,
-        importedAt: summary.importedAt,
-        recordCount: summary.recordCount,
-        dataStartAt: summary.dataStartAt,
-        dataEndAt: summary.dataEndAt,
-      });
+    if (!activeImportId) {
+      return;
     }
+    let active = true;
 
-    loadLatest().catch(() => {
-      if (!mounted) {
+    const poll = async () => {
+      const response = await getImportStatus({
+        userId: DEFAULT_USER_ID,
+        importId: activeImportId,
+      });
+      if (!active || !response.ok || !response.value) {
         return;
       }
-      setLatestSummary(null);
-    });
+      const current = response.value;
+      setLatestSummary(current);
+      setStatus((previous) => ({
+        ...previous,
+        phase: current.stage === "failed" ? "error" : current.stage === "completed" ? "success" : "importing",
+        title: `Import ${current.stage}`,
+        description: `Stage: ${current.stage} (${current.progressPercent}%)`,
+      }));
+
+      if (current.stage === "completed") {
+        setNewAchievements(detectNewAchievementsAfterImport(current.summary?.matchedTrips ?? 0));
+        setActiveImportId(null);
+      }
+      if (current.stage === "failed") {
+        setActiveImportId(null);
+      }
+    };
+
+    void poll();
+    const interval = setInterval(() => {
+      void poll();
+    }, 4_000);
 
     return () => {
-      mounted = false;
+      active = false;
+      clearInterval(interval);
     };
-  }, []);
+  }, [activeImportId]);
 
   const onSelectZip = async () => {
     try {
@@ -73,42 +83,53 @@ export function UploadScreen() {
       setStatus({
         phase: "selected",
         title: "File selected",
-        description: "Ready to import your Uber privacy ZIP locally.",
+        description: "Ready to upload your Uber privacy ZIP for backend processing.",
         selectedFileName: asset.name,
         result: null,
       });
 
-      const fileDescriptor = await toImportFileDescriptor(asset);
+      const sessionResult = await createImportSession({
+        userId: DEFAULT_USER_ID,
+        sourceFileName: asset.name,
+        mimeType: asset.mimeType ?? "application/zip",
+      });
+      if (!sessionResult.ok || !sessionResult.value) {
+        throw new Error(sessionResult.error ?? "Could not create backend import session.");
+      }
 
       setStatus({
         phase: "importing",
-        title: uploadStatusCopy.importingTitle,
-        description: uploadStatusCopy.importingDescription,
+        title: "Uploading ZIP",
+        description: "Uploading your ZIP directly to secure storage...",
         selectedFileName: asset.name,
         result: null,
       });
 
-      const result = await importUberPrivacyZip(fileDescriptor);
-
-      setStatus(buildStatusFromResult(asset.name, result));
-
-      if (result.ok && result.importedAt) {
-        await queuePrivacyImportFileMetadata({
-          provider: "uber",
-          sourceFileName: result.sourceFileName,
-          localUri: asset.uri,
-          fileSizeBytes: asset.size ?? null,
-          importedAt: result.importedAt,
-        });
-        setLatestSummary({
-          sourceFileName: result.sourceFileName,
-          importedAt: result.importedAt,
-          recordCount: result.tripCount,
-          dataStartAt: result.dataStartAt,
-          dataEndAt: result.dataEndAt,
-        });
-        setNewAchievements(detectNewAchievementsAfterImport(result.tripCount));
+      const uploadResult = await uploadZipToS3({
+        uploadUrl: sessionResult.value.uploadUrl,
+        localUri: asset.uri,
+        mimeType: asset.mimeType ?? "application/zip",
+      });
+      if (!uploadResult.ok) {
+        throw new Error(uploadResult.error ?? "ZIP upload failed.");
       }
+
+      const confirmResult = await confirmImportUpload({
+        userId: DEFAULT_USER_ID,
+        importId: sessionResult.value.importId,
+      });
+      if (!confirmResult.ok) {
+        throw new Error(confirmResult.error ?? "Could not start backend processing.");
+      }
+
+      setActiveImportId(sessionResult.value.importId);
+      setStatus({
+        phase: "importing",
+        title: "Processing import",
+        description: "Upload complete. Backend processing has started.",
+        selectedFileName: asset.name,
+        result: null,
+      });
     } catch (error) {
       setStatus({
         phase: "error",
@@ -144,8 +165,8 @@ export function UploadScreen() {
       <Card title={status.title}>
         <Text>{status.description}</Text>
         {status.selectedFileName ? <Text>{`Selected file: ${status.selectedFileName}`}</Text> : null}
-        {status.result ? <ImportResultSummary result={status.result} /> : null}
-        {status.result?.ok && status.result.uberImportSummary ? (
+        {latestSummary ? <BackendImportStatusSummary status={latestSummary} /> : null}
+        {latestSummary?.stage === "completed" ? (
           <PrimaryButton label="Review latest import" onPress={() => router.push("/import/review")} />
         ) : null}
       </Card>
@@ -162,13 +183,13 @@ export function UploadScreen() {
         {latestSummary ? (
           <View>
             <Text>{`File: ${latestSummary.sourceFileName}`}</Text>
-            <Text>{`Imported: ${formatDate(latestSummary.importedAt)}`}</Text>
-            <Text>{`Trips: ${latestSummary.recordCount}`}</Text>
-            <Text>
-              {latestSummary.dataStartAt && latestSummary.dataEndAt
-                ? `Date range: ${formatDate(latestSummary.dataStartAt)} to ${formatDate(latestSummary.dataEndAt)}`
-                : "Date range: unavailable"}
-            </Text>
+            <Text>{`Import started: ${formatDate(latestSummary.startedAt)}`}</Text>
+            <Text>{`Stage: ${latestSummary.stage} (${latestSummary.progressPercent}%)`}</Text>
+            {latestSummary.summary?.tripsDateRange ? (
+              <Text>
+                {`Trip range: ${latestSummary.summary.tripsDateRange.startAt ? formatDate(latestSummary.summary.tripsDateRange.startAt) : "n/a"} to ${latestSummary.summary.tripsDateRange.endAt ? formatDate(latestSummary.summary.tripsDateRange.endAt) : "n/a"}`}
+              </Text>
+            ) : null}
           </View>
         ) : (
           <Text>No file imported yet.</Text>
@@ -178,88 +199,45 @@ export function UploadScreen() {
   );
 }
 
-function ImportResultSummary(props: { result: ImportResult }) {
-  const { result } = props;
+function BackendImportStatusSummary(props: { status: ImportStatusResponse }) {
+  const { status } = props;
+  const summary = status.summary;
 
   return (
     <View style={{ marginTop: 8, gap: 4 }}>
-      <Text>{result.ok ? "Import succeeded." : "Import failed."}</Text>
-      <Text>{`Trips parsed: ${result.tripCount}`}</Text>
-      <Text>{`Raw rows: ${result.rawRowCount}`}</Text>
-      <Text>{`Normalized rows: ${result.normalizedRowCount}`}</Text>
-      {result.dataStartAt && result.dataEndAt ? (
-        <Text>{`Data range: ${formatDate(result.dataStartAt)} to ${formatDate(result.dataEndAt)}`}</Text>
-      ) : null}
-      {result.uberImportSummary ? (
+      <Text>{status.stage === "completed" ? "Import succeeded." : status.stage === "failed" ? "Import failed." : "Import in progress."}</Text>
+      <Text>{`Progress: ${status.progressPercent}%`}</Text>
+      {summary ? (
         <View style={{ gap: 2 }}>
-          <Text>{`Trips file found: ${result.uberImportSummary.discovery.tripsFileFound ? "yes" : "no"}`}</Text>
-          <Text>{`Payments file found: ${result.uberImportSummary.discovery.paymentsFileFound ? "yes" : "no"}`}</Text>
-          <Text>{`Analytics file found: ${result.uberImportSummary.discovery.analyticsFileFound ? "yes" : "no"}`}</Text>
-          <Text>{`Ignored files: ${result.uberImportSummary.discovery.ignoredFilesCount}`}</Text>
-          <Text>{`Matched payment groups: ${result.uberImportSummary.matchedTrips}`}</Text>
-          <Text>{`Unmatched trips: ${result.uberImportSummary.unmatchedTrips}`}</Text>
-          <Text>{`Unmatched payments: ${result.uberImportSummary.unmatchedPaymentGroups}`}</Text>
-          <Text>{`Ambiguous matches: ${result.uberImportSummary.ambiguousMatches}`}</Text>
-          <Text>{`Reimbursements/adjustments detected: ${formatCurrency(result.uberImportSummary.reimbursementsDetected)}`}</Text>
-          {result.uberImportSummary.analyticsCoverageRange ? (
+          <Text>{`Trips file found: ${summary.tripsFileFound ? "yes" : "no"}`}</Text>
+          <Text>{`Payments file found: ${summary.paymentsFileFound ? "yes" : "no"}`}</Text>
+          <Text>{`Analytics file found: ${summary.analyticsFileFound ? "yes" : "no"}`}</Text>
+          <Text>{`Ignored files: ${summary.ignoredFilesCount}`}</Text>
+          <Text>{`Matched payment groups: ${summary.matchedTrips}`}</Text>
+          <Text>{`Unmatched trips: ${summary.unmatchedTrips}`}</Text>
+          <Text>{`Unmatched payments: ${summary.unmatchedPayments}`}</Text>
+          <Text>{`Ambiguous matches: ${summary.ambiguousMatches}`}</Text>
+          <Text>{`Reimbursements/adjustments detected: ${formatCurrency(summary.reimbursementsDetected)}`}</Text>
+          {summary.analyticsCoverageRange ? (
             <Text>
-              {result.uberImportSummary.analyticsCoverageRange.startAt && result.uberImportSummary.analyticsCoverageRange.endAt
-                ? `Analytics coverage: ${formatDate(result.uberImportSummary.analyticsCoverageRange.startAt)} to ${formatDate(result.uberImportSummary.analyticsCoverageRange.endAt)}`
+              {summary.analyticsCoverageRange.startAt && summary.analyticsCoverageRange.endAt
+                ? `Analytics coverage: ${formatDate(summary.analyticsCoverageRange.startAt)} to ${formatDate(summary.analyticsCoverageRange.endAt)}`
                 : "Analytics coverage: partial or unavailable"}
             </Text>
           ) : (
             <Text>Analytics coverage: not provided</Text>
           )}
-          <Text>{`Location-enriched trips: ${result.uberImportSummary.locationEnrichedTrips}`}</Text>
+          <Text>{`Location-enriched trips: ${summary.locationEnrichedTrips}`}</Text>
         </View>
       ) : null}
-      {result.warnings.map((warning, index) => (
+      {status.warnings.map((warning, index) => (
         <Text key={`warning-${index}`}>{`Warning: ${warning}`}</Text>
       ))}
-      {result.errors.map((error, index) => (
+      {status.errors.map((error, index) => (
         <Text key={`error-${index}`}>{`Error: ${error}`}</Text>
       ))}
     </View>
   );
-}
-
-async function toImportFileDescriptor(asset: DocumentPicker.DocumentPickerAsset): Promise<ImportFileDescriptor> {
-  const base64 = await FileSystem.readAsStringAsync(asset.uri, {
-    encoding: FileSystem.EncodingType.Base64,
-  });
-
-  return {
-    fileName: asset.name,
-    mimeType: asset.mimeType ?? "application/zip",
-    extension: "zip",
-    byteLength: asset.size ?? base64.length,
-    contentsBase64: base64,
-  };
-}
-
-function buildStatusFromResult(selectedFileName: string, result: ImportResult): UploadStatusViewModel {
-  if (result.ok) {
-    const summary = result.uberImportSummary;
-    const description = summary
-      ? `Imported ${result.tripCount} trips, matched ${summary.matchedTrips} payment groups, and left ${summary.unmatchedTrips} unmatched trips for review.`
-      : `Imported ${result.tripCount} trips and updated local truth metrics.`;
-
-    return {
-      phase: "success",
-      title: "Import completed",
-      description,
-      selectedFileName,
-      result,
-    };
-  }
-
-  return {
-    phase: "error",
-    title: "Import failed",
-    description: "The file could not be imported. Review the message and try another ZIP.",
-    selectedFileName,
-    result,
-  };
 }
 
 function formatDate(dateIso: string): string {

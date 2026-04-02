@@ -129,3 +129,86 @@ export interface CloudSyncConfig {
   receiptsBucket: string;
   importsBucket: string;
 }
+
+export type BackendImportStage =
+  | "created"
+  | "uploading"
+  | "uploaded"
+  | "parsing"
+  | "validating"
+  | "matching"
+  | "enriching"
+  | "completed"
+  | "failed";
+
+export interface ImportStageTiming {
+  stage: BackendImportStage;
+  startedAt: string;
+  finishedAt: string | null;
+  durationMs: number | null;
+}
+
+export interface BackendImportSummary {
+  tripsFileFound: boolean;
+  paymentsFileFound: boolean;
+  analyticsFileFound: boolean;
+  ignoredFilesCount: number;
+  tripsDateRange: { startAt: string | null; endAt: string | null };
+  paymentsDateRange: { startAt: string | null; endAt: string | null };
+  analyticsDateRange: { startAt: string | null; endAt: string | null } | null;
+  matchedTrips: number;
+  unmatchedTrips: number;
+  unmatchedPayments: number;
+  ambiguousMatches: number;
+  reimbursementsDetected: number;
+  analyticsCoverageRange: { startAt: string | null; endAt: string | null } | null;
+  locationEnrichedTrips: number;
+}
+
+export interface BackendImportDiagnostics {
+  rowsParsed: {
+    trips: number;
+    payments: number;
+    analytics: number;
+  };
+  matchesCreated: number;
+  analyticsCoverage: "none" | "partial" | "full";
+  failureReason: string | null;
+}
+
+export interface CreateImportSessionRequest {
+  userId: string;
+  provider: "uber";
+  sourceFileName: string;
+  mimeType?: string;
+}
+
+export interface CreateImportSessionResponse {
+  importId: string;
+  objectKey: string;
+  uploadUrl: string;
+  expiresInSeconds: number;
+  stage: BackendImportStage;
+}
+
+export interface ConfirmImportUploadRequest {
+  userId: string;
+  importId: string;
+}
+
+export interface ImportStatusResponse {
+  importId: string;
+  userId: string;
+  provider: "uber";
+  sourceFileName: string;
+  objectKey: string;
+  stage: BackendImportStage;
+  startedAt: string;
+  finishedAt: string | null;
+  progressPercent: number;
+  stageTimings: ImportStageTiming[];
+  summary: BackendImportSummary | null;
+  diagnostics: BackendImportDiagnostics | null;
+  warnings: string[];
+  errors: string[];
+}
