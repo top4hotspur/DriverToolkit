@@ -5,11 +5,15 @@ import { Animated, Pressable, StyleSheet, Text, View } from "react-native";
 import { GoOnlineNowDecisionContract } from "../contracts/goOnlineNow";
 import { OfflineAction } from "../contracts/tasks";
 import { BusinessMileageSummary } from "../contracts/tracking";
-import { ProximityAlertResult, TrackedPlace } from "../contracts/advisory";
+import {
+  ProximityAlertResult,
+  TrackedPlace,
+} from "../contracts/advisory";
 import {
   buildTrackedPlacesFromFavourites,
   evaluateProximityAlert,
 } from "../engines/advisory/proximityAlerts";
+import { fetchTranslinkRailSnapshots } from "../engines/advisory/translinkRail";
 import { getLatestImportSummary } from "../engines/import/importPersistence";
 import {
   getBusinessMileageSummary,
@@ -358,19 +362,32 @@ export function DashboardScreen() {
       return;
     }
 
-    const evaluate = () => {
+    let active = true;
+    const evaluate = async () => {
+      const rail = await fetchTranslinkRailSnapshots({
+        now: new Date(),
+      }).catch(() => ({ snapshots: [], warnings: [] }));
+      if (!active) {
+        return;
+      }
       const next = evaluateProximityAlert({
         now: new Date(),
         currentCoords,
         trackedPlaces,
         radiusMiles: 5,
+        railSnapshots: rail.snapshots,
       });
       setProximityAlert(next);
     };
 
-    evaluate();
+    evaluate().catch(() => {
+      // Keep current advisory if rail fetch fails; proximity defaults remain safe.
+    });
     const interval = setInterval(evaluate, 5 * 60 * 1000);
-    return () => clearInterval(interval);
+    return () => {
+      active = false;
+      clearInterval(interval);
+    };
   }, [currentCoords, session.mode, trackedPlaces]);
 
   useEffect(() => {

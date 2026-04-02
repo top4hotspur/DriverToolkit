@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
-import { DayAnomaly, OpportunityWindow } from "../contracts/diary";
-import { buildSmartDiaryPlanner } from "../presentation/smartDiaryAdvisory";
+import { DayAnomaly, DiaryPlannerOutput, OpportunityWindow } from "../contracts/diary";
+import { buildSmartDiaryPlannerWithRail } from "../presentation/smartDiaryAdvisory";
 import { listStartPoints } from "../state/startPoints";
 import { StartPoint } from "../state/startPointTypes";
 import { Card, ScreenShell } from "./ui";
@@ -9,6 +9,7 @@ import { Card, ScreenShell } from "./ui";
 export function SmartDiaryScreen() {
   const [favourites, setFavourites] = useState<StartPoint[]>([]);
   const [selectedDayIndex, setSelectedDayIndex] = useState(0);
+  const [planner, setPlanner] = useState<DiaryPlannerOutput>(() => emptyPlanner(new Date()));
 
   useEffect(() => {
     listStartPoints()
@@ -16,14 +17,30 @@ export function SmartDiaryScreen() {
       .catch(() => setFavourites([]));
   }, []);
 
-  const planner = useMemo(
-    () =>
-      buildSmartDiaryPlanner({
-        favourites,
-        now: new Date(),
-      }),
-    [favourites],
-  );
+  useEffect(() => {
+    let active = true;
+    const now = new Date();
+
+    buildSmartDiaryPlannerWithRail({
+      favourites,
+      now,
+    })
+      .then((next) => {
+        if (active) {
+          setPlanner(next);
+          setSelectedDayIndex((prev) => Math.min(prev, Math.max(0, next.days.length - 1)));
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setPlanner(emptyPlanner(now));
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [favourites]);
 
   const selectedDay = planner.days[selectedDayIndex] ?? planner.days[0];
 
@@ -86,6 +103,33 @@ function AnomalyRow(props: { anomaly: DayAnomaly }) {
       <Text>{props.anomaly.message}</Text>
     </View>
   );
+}
+
+function emptyPlanner(now: Date): DiaryPlannerOutput {
+  const dateIso = now.toISOString();
+  return {
+    generatedAt: dateIso,
+    basisLabel: "7 day rolling planner from favourites and live disruption monitoring",
+    sourceAnchors: [],
+    days: [
+      {
+        day: {
+          dateIso,
+          dayLabel: now.toLocaleDateString("en-GB", {
+            weekday: "long",
+            day: "2-digit",
+            month: "short",
+            year: "numeric",
+          }),
+          selectorLabel: "Today",
+          isToday: true,
+          isTomorrow: false,
+        },
+        anomalies: [],
+        opportunities: [],
+      },
+    ],
+  };
 }
 
 function OpportunityRow(props: { opportunity: OpportunityWindow }) {

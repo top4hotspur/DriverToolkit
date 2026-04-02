@@ -2,6 +2,7 @@ import {
   BaselineHourlyExpectation,
   LiveArrivalAnomaly,
   ProximityAlertResult,
+  RailStationLiveSnapshot,
   TrackedPlace,
   TrackedPlaceType,
 } from "../../contracts/advisory";
@@ -17,6 +18,12 @@ import {
   WeatherAnomaly,
 } from "../../contracts/diary";
 import { StartPoint } from "../../state/startPointTypes";
+import {
+  buildSeededRailSnapshotForDay,
+  classifyRailActivity,
+  getTrackedRailStations,
+  stationForTrackedPlace,
+} from "./translinkRail";
 
 const SEEDED_TRACKED_PLACES: TrackedPlace[] = [
   {
@@ -41,6 +48,22 @@ const SEEDED_TRACKED_PLACES: TrackedPlace[] = [
     type: "station",
     latitude: 54.5942,
     longitude: -5.9197,
+    source: "seeded",
+  },
+  {
+    id: "seeded-grand-central",
+    label: "Grand Central",
+    type: "station",
+    latitude: 54.5958,
+    longitude: -5.9344,
+    source: "seeded",
+  },
+  {
+    id: "seeded-bangor",
+    label: "Bangor",
+    type: "station",
+    latitude: 54.6646,
+    longitude: -5.6686,
     source: "seeded",
   },
   {
@@ -71,6 +94,7 @@ export function buildDiaryPlanner(args: {
   now: Date;
   trackedPlaces: TrackedPlace[];
   days?: number;
+  railSnapshots?: RailStationLiveSnapshot[];
 }): DiaryPlannerOutput {
   const dayCount = Math.max(1, Math.min(args.days ?? 7, 7));
   const sourceAnchors: DiarySourceAnchor[] = args.trackedPlaces.map((place) => ({
@@ -87,8 +111,18 @@ export function buildDiaryPlanner(args: {
   for (let index = 0; index < dayCount; index += 1) {
     const date = startOfDay(addDays(args.now, index));
     const day = toDiaryDay(date, index);
-    const anomalies = buildDayAnomalies({ date, trackedPlaces: args.trackedPlaces });
-    const opportunities = buildOpportunityWindows({ date, trackedPlaces: args.trackedPlaces });
+    const anomalies = buildDayAnomalies({
+      date,
+      trackedPlaces: args.trackedPlaces,
+      railSnapshots: args.railSnapshots ?? [],
+      plannerNow: args.now,
+    });
+    const opportunities = buildOpportunityWindows({
+      date,
+      trackedPlaces: args.trackedPlaces,
+      railSnapshots: args.railSnapshots ?? [],
+      plannerNow: args.now,
+    });
     days.push({ day, anomalies, opportunities });
   }
 
@@ -106,6 +140,7 @@ export function evaluateProximityAlert(args: {
   currentCoords: { latitude: number; longitude: number } | null;
   trackedPlaces: TrackedPlace[];
   radiusMiles?: number;
+  railSnapshots?: RailStationLiveSnapshot[];
 }): ProximityAlertResult {
   const evaluatedAt = args.now.toISOString();
   if (!args.currentCoords || args.trackedPlaces.length === 0) {
@@ -146,7 +181,7 @@ export function evaluateProximityAlert(args: {
   }
 
   const anomalies = nearbyPlaces
-    .map((candidate) => evaluatePlaceAnomaly(candidate.place, args.now))
+    .map((candidate) => evaluatePlaceAnomaly(candidate.place, args.now, args.railSnapshots ?? []))
     .filter((anomaly): anomaly is LiveArrivalAnomaly => anomaly !== null);
 
   if (anomalies.length === 0) {
@@ -174,9 +209,14 @@ export function evaluateProximityAlert(args: {
   };
 }
 
-function buildDayAnomalies(args: { date: Date; trackedPlaces: TrackedPlace[] }): DayAnomaly[] {
+function buildDayAnomalies(args: {
+  date: Date;
+  trackedPlaces: TrackedPlace[];
+  railSnapshots: RailStationLiveSnapshot[];
+  plannerNow: Date;
+}): DayAnomaly[] {
   const weather = buildWeatherAnomaly(args.date, args.trackedPlaces[0]);
-  const transport = buildTransportAnomaly(args.date, args.trackedPlaces);
+  const transport = buildTransportAnomaly(args.date, args.trackedPlaces, args.railSnapshots, args.plannerNow);
   const airport = buildAirportAnomaly(args.date, args.trackedPlaces);
 
   return [weather, transport, airport]
@@ -184,7 +224,12 @@ function buildDayAnomalies(args: { date: Date; trackedPlaces: TrackedPlace[] }):
     .sort((a, b) => new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime());
 }
 
-function buildOpportunityWindows(args: { date: Date; trackedPlaces: TrackedPlace[] }): OpportunityWindow[] {
+function buildOpportunityWindows(args: {
+  date: Date;
+  trackedPlaces: TrackedPlace[];
+  railSnapshots: RailStationLiveSnapshot[];
+  plannerNow: Date;
+}): OpportunityWindow[] {
   const anchors = args.trackedPlaces.slice(0, Math.min(args.trackedPlaces.length, 6));
   const opportunities = anchors.map((place, index) => {
     const hourSeed = (seedFromId(place.id) + args.date.getDay() + index * 3) % 14;
@@ -210,7 +255,10 @@ function buildOpportunityWindows(args: { date: Date; trackedPlaces: TrackedPlace
     };
   });
 
-  return opportunities.sort((a, b) => new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime());
+  const railOpportunities = buildRailOpportunityWindows(args.date, args.railSnapshots, args.plannerNow);
+  return [...opportunities, ...railOpportunities].sort(
+    (a, b) => new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime(),
+  );
 }
 
 function buildWeatherAnomaly(date: Date, anchor: TrackedPlace | undefined): WeatherAnomaly | null {
@@ -234,21 +282,46 @@ function buildWeatherAnomaly(date: Date, anchor: TrackedPlace | undefined): Weat
   };
 }
 
-function buildTransportAnomaly(date: Date, trackedPlaces: TrackedPlace[]): TransportDisruptionAnomaly | null {
-  const station = trackedPlaces.find((place) => place.type === "station");
+function buildTransportAnomaly(
+  date: Date,
+  trackedPlaces: TrackedPlace[],
+  railSnapshots: RailStationLiveSnapshot[],
+  plannerNow: Date,
+): TransportDisruptionAnomaly | null {
+  const station = trackedPlaces.find((place) => place.type === "station") ?? null;
+  const dayKey = date.toISOString().slice(0, 10);
+  const isToday = dayKey === plannerNow.toISOString().slice(0, 10);
+  if (isToday) {
+    const liveDisruption = railSnapshots.find((snapshot) => snapshot.replacementBusCount > 0 || snapshot.cancelledCount > 0);
+    if (liveDisruption) {
+      const startsAt = new Date(plannerNow);
+      const endsAt = new Date(plannerNow.getTime() + 2 * 60 * 60 * 1000);
+      const replacement = liveDisruption.replacementBusCount > 0;
+      return {
+        id: `transport-live-${liveDisruption.stationId}-${dayKey}`,
+        type: "transport-disruption",
+        severity: "warning",
+        networkLabel: `${liveDisruption.stationLabel} rail corridor`,
+        startsAt: startsAt.toISOString(),
+        endsAt: endsAt.toISOString(),
+        message: replacement
+          ? `Replacement bus service expected on this corridor (${formatHourWindow(startsAt, endsAt)}).`
+          : `Rail disruption expected in this period (${formatHourWindow(startsAt, endsAt)}).`,
+      };
+    }
+  }
+
   if (!station) {
     return null;
   }
-
   const seed = seedFromId(`${station.id}-${date.getDay()}-transport`);
   if (seed % 4 !== 0) {
     return null;
   }
-
   const startsAt = atHour(date, 10);
   const endsAt = atHour(date, 16);
   return {
-    id: `transport-${station.id}-${date.toISOString().slice(0, 10)}`,
+    id: `transport-${station.id}-${dayKey}`,
     type: "transport-disruption",
     severity: "warning",
     networkLabel: `${station.label} rail corridor`,
@@ -311,7 +384,73 @@ function buildOpportunityDetail(place: TrackedPlace, arrivals: number, baseline:
   return `Event due to end.`;
 }
 
-function evaluatePlaceAnomaly(place: TrackedPlace, now: Date): LiveArrivalAnomaly | null {
+function evaluatePlaceAnomaly(
+  place: TrackedPlace,
+  now: Date,
+  railSnapshots: RailStationLiveSnapshot[],
+): LiveArrivalAnomaly | null {
+  const station = stationForTrackedPlace(place);
+  if (station) {
+    const liveSnapshot =
+      railSnapshots.find((snapshot) => snapshot.stationId === station.id) ??
+      buildSeededRailSnapshotForDay({ station, at: now });
+    if (liveSnapshot.replacementBusCount > 0) {
+      return {
+        trackedPlaceId: place.id,
+        trackedPlaceLabel: station.label,
+        stationCode: station.stationCode,
+        type: "replacement-bus",
+        baselineArrivals: classifyRailActivity({
+          stationId: station.id,
+          now,
+          arrivalsNextHour: liveSnapshot.arrivalsNextHour,
+        }).baseline.expectedArrivalsNextHour,
+        nextHourArrivals: liveSnapshot.arrivalsNextHour,
+        disruptionMessage: "Replacement bus service expected on this corridor",
+      };
+    }
+    if (liveSnapshot.cancelledCount > 0 || liveSnapshot.delayedCount >= 3) {
+      return {
+        trackedPlaceId: place.id,
+        trackedPlaceLabel: station.label,
+        stationCode: station.stationCode,
+        type: "rail-disruption",
+        baselineArrivals: classifyRailActivity({
+          stationId: station.id,
+          now,
+          arrivalsNextHour: liveSnapshot.arrivalsNextHour,
+        }).baseline.expectedArrivalsNextHour,
+        nextHourArrivals: liveSnapshot.arrivalsNextHour,
+        disruptionMessage: "Rail disruption affecting this corridor",
+      };
+    }
+    const classification = classifyRailActivity({
+      stationId: station.id,
+      now,
+      arrivalsNextHour: liveSnapshot.arrivalsNextHour,
+    });
+    if (classification.classification === "significantly_higher_than_average") {
+      return {
+        trackedPlaceId: place.id,
+        trackedPlaceLabel: station.label,
+        stationCode: station.stationCode,
+        type: "significantly-above-average",
+        baselineArrivals: classification.baseline.expectedArrivalsNextHour,
+        nextHourArrivals: liveSnapshot.arrivalsNextHour,
+      };
+    }
+    if (classification.classification === "higher_than_average") {
+      return {
+        trackedPlaceId: place.id,
+        trackedPlaceLabel: station.label,
+        stationCode: station.stationCode,
+        type: "above-average",
+        baselineArrivals: classification.baseline.expectedArrivalsNextHour,
+        nextHourArrivals: liveSnapshot.arrivalsNextHour,
+      };
+    }
+  }
+
   const baseline = getBaselineExpectation(place.id, now);
   const nextHourArrivals = simulateNextHourArrivals(place, now);
 
@@ -353,16 +492,25 @@ function evaluatePlaceAnomaly(place: TrackedPlace, now: Date): LiveArrivalAnomal
 }
 
 function buildHeadline(anomaly: LiveArrivalAnomaly): string {
+  if (anomaly.type === "replacement-bus") {
+    return "Replacement bus service expected on this corridor";
+  }
+  if (anomaly.type === "rail-disruption") {
+    return `Rail disruption affecting ${anomaly.trackedPlaceLabel} services`;
+  }
   if (anomaly.type === "above-average") {
-    return `More than average arrivals in the next hour at ${anomaly.trackedPlaceLabel}`;
+    return `Higher than average passenger arrivals expected at ${anomaly.trackedPlaceLabel} in the next hour`;
   }
   if (anomaly.type === "significantly-above-average") {
-    return `Significantly more arrivals than usual near ${anomaly.trackedPlaceLabel}`;
+    return `Significantly higher than average passenger arrivals expected at ${anomaly.trackedPlaceLabel}`;
   }
   return `${anomaly.delayedArrivals?.length ?? 0} delayed flights due into ${shortCode(anomaly.trackedPlaceLabel)} in the next hour`;
 }
 
 function buildDetails(anomaly: LiveArrivalAnomaly): string {
+  if (anomaly.type === "replacement-bus" || anomaly.type === "rail-disruption") {
+    return anomaly.disruptionMessage ?? "Service disruption expected in this period.";
+  }
   if (anomaly.type === "delayed-flight" && anomaly.delayedArrivals && anomaly.delayedArrivals.length > 0) {
     const detail = anomaly.delayedArrivals
       .slice(0, 2)
@@ -378,12 +526,63 @@ function buildDetails(anomaly: LiveArrivalAnomaly): string {
   return `${anomaly.nextHourArrivals} expected vs baseline ${anomaly.baselineArrivals} in the next 60 minutes.`;
 }
 
+function buildRailOpportunityWindows(
+  date: Date,
+  railSnapshots: RailStationLiveSnapshot[],
+  plannerNow: Date,
+): OpportunityWindow[] {
+  const isToday = date.toISOString().slice(0, 10) === plannerNow.toISOString().slice(0, 10);
+  const stations = getTrackedRailStations();
+  const opportunities: OpportunityWindow[] = [];
+
+  for (const station of stations) {
+    const snapshot = isToday
+      ? railSnapshots.find((item) => item.stationId === station.id) ?? buildSeededRailSnapshotForDay({ station, at: date })
+      : buildSeededRailSnapshotForDay({ station, at: date });
+
+    const classification = classifyRailActivity({
+      stationId: station.id,
+      now: date,
+      arrivalsNextHour: snapshot.arrivalsNextHour,
+    });
+    if (classification.classification === "normal") {
+      continue;
+    }
+
+    const startsAt = isToday ? new Date(plannerNow) : atHour(date, 7 + (seedFromId(station.id) % 10));
+    const endsAt = new Date(startsAt.getTime() + 60 * 60 * 1000);
+    opportunities.push({
+      id: `rail-opp-${station.id}-${date.toISOString().slice(0, 10)}`,
+      startsAt: startsAt.toISOString(),
+      endsAt: endsAt.toISOString(),
+      anchorId: `rail-${station.id}`,
+      anchorLabel: station.label,
+      anchorType: "station",
+      confidence: classification.classification === "significantly_higher_than_average" ? "HIGH" : "MEDIUM",
+      title: `${station.label} rail window`,
+      detail:
+        classification.classification === "significantly_higher_than_average"
+          ? "Significantly higher than average passenger arrivals expected"
+          : "Higher than average passenger arrivals expected",
+    });
+  }
+
+  return opportunities;
+}
+
 function inferPlaceType(label: string, postcode: string): TrackedPlaceType {
   const text = `${label} ${postcode}`.toLowerCase();
   if (text.includes("airport") || text.includes("bfs") || text.includes("bhd")) {
     return "airport";
   }
-  if (text.includes("station") || text.includes("rail") || text.includes("lanyon")) {
+  if (
+    text.includes("station") ||
+    text.includes("rail") ||
+    text.includes("lanyon") ||
+    text.includes("bangor") ||
+    text.includes("grand central") ||
+    text.includes("great victoria")
+  ) {
     return "station";
   }
   return "venue";
