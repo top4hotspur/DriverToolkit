@@ -10,6 +10,7 @@ import {
   getImportStatus,
   uploadZipToS3,
 } from "../engines/cloud/importSync";
+import { getImportApiBaseResolution } from "../engines/cloud/storageScaffold";
 import { NewAchievementDetectionResult } from "../contracts/newAchievements";
 import { detectNewAchievementsAfterImport } from "../presentation/newAchievements";
 import { createIdleUploadStatus, uploadStatusCopy } from "../presentation/placeholderUpload";
@@ -23,6 +24,7 @@ export function UploadScreen() {
   const [latestSummary, setLatestSummary] = useState<ImportStatusResponse | null>(null);
   const [newAchievements, setNewAchievements] = useState<NewAchievementDetectionResult | null>(null);
   const [activeImportId, setActiveImportId] = useState<string | null>(null);
+  const importBaseResolution = getImportApiBaseResolution();
 
   useEffect(() => {
     if (!activeImportId) {
@@ -162,6 +164,9 @@ export function UploadScreen() {
 
       <Card title="Import Uber ZIP">
         <Text>{`Accepted: ${uploadStatusCopy.acceptedFileTypes.join(", ")}`}</Text>
+        <Text>{`Debug import base URL: ${importBaseResolution.baseUrl ?? "not-resolved"}`}</Text>
+        <Text>{`Debug source: ${importBaseResolution.source}`}</Text>
+        <Text>{`Debug valid: ${importBaseResolution.valid ? "yes" : "no"}`}</Text>
         <PrimaryButton label="Select ZIP and Import" onPress={onSelectZip} />
       </Card>
 

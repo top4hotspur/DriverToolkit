@@ -3,7 +3,7 @@ import {
   CreateImportSessionResponse,
   ImportStatusResponse,
 } from "../../contracts/cloudStorage";
-import { getImportApiBaseUrl, getMissingImportConfigKeys } from "./storageScaffold";
+import { getImportApiBaseResolution, getImportApiBaseUrl, getMissingImportConfigKeys } from "./storageScaffold";
 
 export type ImportSyncResult<T> = {
   ok: boolean;
@@ -19,9 +19,12 @@ export async function createImportSession(args: {
   const apiBaseUrl = getImportApiBaseUrl();
   if (!apiBaseUrl) {
     const missing = getMissingImportConfigKeys();
+    const resolution = getImportApiBaseResolution();
     return {
       ok: false,
-      error: `Cloud import endpoint is not configured. Missing: ${missing.join(", ")}.`,
+      error: `Cloud import endpoint is not configured. Missing: ${missing.join(
+        ", ",
+      )}. Seen env(EXPO_PUBLIC_IMPORT_API_BASE_URL=${resolution.seen.envImportApiBaseUrl}, EXPO_PUBLIC_CLOUD_SYNC_BASE_URL=${resolution.seen.envCloudSyncBaseUrl}, EXPO_PUBLIC_API_BASE_URL=${resolution.seen.envApiBaseUrl}) expo.extra(importApiBaseUrl=${resolution.seen.expoExtraImportApiBaseUrl}, apiBaseUrl=${resolution.seen.expoExtraApiBaseUrl}).`,
     };
   }
 
@@ -82,7 +85,13 @@ export async function confirmImportUpload(args: ConfirmImportUploadRequest): Pro
   const apiBaseUrl = getImportApiBaseUrl();
   if (!apiBaseUrl) {
     const missing = getMissingImportConfigKeys();
-    return { ok: false, error: `Cloud import endpoint is not configured. Missing: ${missing.join(", ")}.` };
+    const resolution = getImportApiBaseResolution();
+    return {
+      ok: false,
+      error: `Cloud import endpoint is not configured. Missing: ${missing.join(
+        ", ",
+      )}. Seen env(EXPO_PUBLIC_IMPORT_API_BASE_URL=${resolution.seen.envImportApiBaseUrl}, EXPO_PUBLIC_CLOUD_SYNC_BASE_URL=${resolution.seen.envCloudSyncBaseUrl}, EXPO_PUBLIC_API_BASE_URL=${resolution.seen.envApiBaseUrl}) expo.extra(importApiBaseUrl=${resolution.seen.expoExtraImportApiBaseUrl}, apiBaseUrl=${resolution.seen.expoExtraApiBaseUrl}).`,
+    };
   }
 
   try {
@@ -113,7 +122,13 @@ export async function getImportStatus(args: {
   const apiBaseUrl = getImportApiBaseUrl();
   if (!apiBaseUrl) {
     const missing = getMissingImportConfigKeys();
-    return { ok: false, error: `Cloud import endpoint is not configured. Missing: ${missing.join(", ")}.` };
+    const resolution = getImportApiBaseResolution();
+    return {
+      ok: false,
+      error: `Cloud import endpoint is not configured. Missing: ${missing.join(
+        ", ",
+      )}. Seen env(EXPO_PUBLIC_IMPORT_API_BASE_URL=${resolution.seen.envImportApiBaseUrl}, EXPO_PUBLIC_CLOUD_SYNC_BASE_URL=${resolution.seen.envCloudSyncBaseUrl}, EXPO_PUBLIC_API_BASE_URL=${resolution.seen.envApiBaseUrl}) expo.extra(importApiBaseUrl=${resolution.seen.expoExtraImportApiBaseUrl}, apiBaseUrl=${resolution.seen.expoExtraApiBaseUrl}).`,
+    };
   }
 
   try {
