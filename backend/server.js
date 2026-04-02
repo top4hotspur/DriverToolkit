@@ -22,6 +22,224 @@ function nowIso() {
   return new Date().toISOString();
 }
 
+function normalizeHeader(header) {
+  return String(header ?? "")
+    .trim()
+    .replace(/^\uFEFF/, "")
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_")
+    .replace(/_+/g, "_");
+}
+
+function parseCsvLine(line) {
+  const values = [];
+  let current = "";
+  let inQuotes = false;
+
+  for (let i = 0; i < line.length; i += 1) {
+    const ch = line[i];
+
+    if (ch === '"') {
+      if (inQuotes && line[i + 1] === '"') {
+        current += '"';
+        i += 1;
+      } else {
+        inQuotes = !inQuotes;
+      }
+      continue;
+    }
+
+    if (ch === "," && !inQuotes) {
+      values.push(current);
+      current = "";
+      continue;
+    }
+
+    current += ch;
+  }
+
+  values.push(current);
+  return values;
+}
+
+function parseCsvText(csvText) {
+  const rows = [];
+  let current = "";
+  let inQuotes = false;
+
+  for (let i = 0; i < csvText.length; i += 1) {
+    const ch = csvText[i];
+    const next = csvText[i + 1];
+
+    if (ch === '"') {
+      if (inQuotes && next === '"') {
+        current += '""';
+        i += 1;
+      } else {
+        inQuotes = !inQuotes;
+        current += ch;
+      }
+      continue;
+    }
+
+    if ((ch === "\n" || ch === "\r") && !inQuotes) {
+      if (ch === "\r" && next === "\n") {
+        i += 1;
+      }
+      rows.push(current);
+      current = "";
+      continue;
+    }
+
+    current += ch;
+  }
+
+  if (current.length > 0) {
+    rows.push(current);
+  }
+
+  if (rows.length === 0) {
+    return { headers: [], rowCount: 0, sampleRows: [], dataRows: [] };
+  }
+
+  const headerValues = parseCsvLine(rows[0]).map((value) =>
+    String(value ?? "").trim().replace(/^\uFEFF/, "")
+  );
+  const dataRows = [];
+
+  for (let i = 1; i < rows.length; i += 1) {
+    const rawLine = rows[i];
+    if (!rawLine || rawLine.trim().length === 0) {
+      continue;
+    }
+    const values = parseCsvLine(rawLine);
+    const row = {};
+    for (let j = 0; j < headerValues.length; j += 1) {
+      row[headerValues[j]] = (values[j] ?? "").trim();
+    }
+    dataRows.push(row);
+  }
+
+  return {
+    headers: headerValues,
+    rowCount: dataRows.length,
+    sampleRows: dataRows.slice(0, 3),
+    dataRows,
+  };
+}
+
+function parseDateValue(value) {
+  if (value == null) {
+    return null;
+  }
+  const trimmed = String(value).trim().replace(/^"|"$/g, "");
+  if (!trimmed) {
+    return null;
+  }
+
+  const direct = Date.parse(trimmed);
+  if (!Number.isNaN(direct)) {
+    return new Date(direct);
+  }
+
+  const normalized = trimmed.includes(" ")
+    ? trimmed.replace(" ", "T")
+    : trimmed;
+  const normalizedParse = Date.parse(normalized);
+  if (!Number.isNaN(normalizedParse)) {
+    return new Date(normalizedParse);
+  }
+
+  return null;
+}
+
+function resolveTimestampField(headers, preferredField) {
+  const normalizedToRaw = new Map(
+    headers.map((header) => [normalizeHeader(header), header])
+  );
+
+  const preferredNormalized = normalizeHeader(preferredField);
+  if (normalizedToRaw.has(preferredNormalized)) {
+    return normalizedToRaw.get(preferredNormalized);
+  }
+
+  return null;
+}
+
+function computeDateRange(rows, timestampField) {
+  if (!timestampField) {
+    return null;
+  }
+
+  let minMs = null;
+  let maxMs = null;
+
+  for (const row of rows) {
+    const parsed = parseDateValue(row[timestampField]);
+    if (!parsed) {
+      continue;
+    }
+    const ts = parsed.getTime();
+    if (minMs == null || ts < minMs) {
+      minMs = ts;
+    }
+    if (maxMs == null || ts > maxMs) {
+      maxMs = ts;
+    }
+  }
+
+  if (minMs == null || maxMs == null) {
+    return null;
+  }
+
+  return {
+    startAt: new Date(minMs).toISOString(),
+    endAt: new Date(maxMs).toISOString(),
+  };
+}
+
+function summarizeCsvEntry(zip, entryName, preferredTimestampField) {
+  if (!entryName) {
+    return {
+      found: false,
+      headers: [],
+      rowCount: 0,
+      sampleRows: [],
+      timestampFieldUsed: null,
+      dateRange: null,
+    };
+  }
+
+  const entry = zip.getEntry(entryName);
+  if (!entry) {
+    return {
+      found: false,
+      headers: [],
+      rowCount: 0,
+      sampleRows: [],
+      timestampFieldUsed: null,
+      dateRange: null,
+    };
+  }
+
+  const csvText = entry.getData().toString("utf8");
+  const parsed = parseCsvText(csvText);
+  const timestampFieldUsed = resolveTimestampField(
+    parsed.headers,
+    preferredTimestampField
+  );
+  const dateRange = computeDateRange(parsed.dataRows, timestampFieldUsed);
+
+  return {
+    found: true,
+    headers: parsed.headers,
+    rowCount: parsed.rowCount,
+    sampleRows: parsed.sampleRows,
+    timestampFieldUsed,
+    dateRange,
+  };
+}
+
 function pickBestEntryName(entryNames, options) {
   const normalizedEntries = entryNames.map((original) => ({
     original,
@@ -82,18 +300,12 @@ function buildStatusPayload(record) {
     paymentsFileFound: false,
     analyticsFileFound: false,
     ignoredFilesCount: 0,
-    tripsDateRange: {
-      startAt: "2024-05-10T23:42:58.000Z",
-      endAt: "2026-03-31T23:59:59.000Z",
-    },
-    paymentsDateRange: {
-      startAt: "2024-05-10T23:42:58.000Z",
-      endAt: "2026-03-31T23:59:59.000Z",
-    },
-    analyticsDateRange: {
-      startAt: "2026-03-01T00:00:00.000Z",
-      endAt: "2026-03-31T23:59:59.000Z",
-    },
+    tripsRowCount: 0,
+    paymentsRowCount: 0,
+    analyticsRowCount: 0,
+    tripsDateRange: null,
+    paymentsDateRange: null,
+    analyticsDateRange: null,
     matchedTrips: 9500,
     unmatchedTrips: 120,
     unmatchedPayments: 45,
@@ -128,9 +340,9 @@ function buildStatusPayload(record) {
     summary,
     diagnostics: {
       rowsParsed: {
-        trips: 10669,
-        payments: 32145,
-        analytics: 263943,
+        trips: summary.tripsRowCount ?? 0,
+        payments: summary.paymentsRowCount ?? 0,
+        analytics: summary.analyticsRowCount ?? 0,
       },
       matchesCreated: 9500,
       analyticsCoverage: "partial",
@@ -264,12 +476,64 @@ app.post("/api/imports/:importId/confirm", (req, res) => {
     }).length;
     console.log(`[IMPORT][confirm] ignoredFilesCount=${ignoredFilesCount}`);
 
+    const tripsSummary = summarizeCsvEntry(
+      zip,
+      tripsEntryName,
+      "request_timestamp_local"
+    );
+    const paymentsSummary = summarizeCsvEntry(
+      zip,
+      paymentsEntryName,
+      "local_timestamp"
+    );
+    const analyticsSummary = summarizeCsvEntry(
+      zip,
+      analyticsEntryName,
+      "event_time_utc"
+    );
+
+    console.log(
+      `[IMPORT][confirm] csv trips rowCount=${tripsSummary.rowCount} timestampField=${tripsSummary.timestampFieldUsed} dateRange=${JSON.stringify(tripsSummary.dateRange)}`
+    );
+    console.log(
+      `[IMPORT][confirm] csv payments rowCount=${paymentsSummary.rowCount} timestampField=${paymentsSummary.timestampFieldUsed} dateRange=${JSON.stringify(paymentsSummary.dateRange)}`
+    );
+    console.log(
+      `[IMPORT][confirm] csv analytics rowCount=${analyticsSummary.rowCount} timestampField=${analyticsSummary.timestampFieldUsed} dateRange=${JSON.stringify(analyticsSummary.dateRange)}`
+    );
+
     record.summary = {
       ...(record.summary ?? {}),
       tripsFileFound,
       paymentsFileFound,
       analyticsFileFound,
       ignoredFilesCount,
+      tripsRowCount: tripsSummary.rowCount,
+      paymentsRowCount: paymentsSummary.rowCount,
+      analyticsRowCount: analyticsSummary.rowCount,
+      tripsDateRange: tripsSummary.dateRange,
+      paymentsDateRange: paymentsSummary.dateRange,
+      analyticsDateRange: analyticsSummary.dateRange,
+      parsedFileDetails: {
+        trips: {
+          selectedFileName: tripsEntryName,
+          headers: tripsSummary.headers,
+          timestampFieldUsed: tripsSummary.timestampFieldUsed,
+          sampleRows: tripsSummary.sampleRows,
+        },
+        payments: {
+          selectedFileName: paymentsEntryName,
+          headers: paymentsSummary.headers,
+          timestampFieldUsed: paymentsSummary.timestampFieldUsed,
+          sampleRows: paymentsSummary.sampleRows,
+        },
+        analytics: {
+          selectedFileName: analyticsEntryName,
+          headers: analyticsSummary.headers,
+          timestampFieldUsed: analyticsSummary.timestampFieldUsed,
+          sampleRows: analyticsSummary.sampleRows,
+        },
+      },
     };
     console.log(
       `[IMPORT][confirm] summary=${JSON.stringify(record.summary)}`
