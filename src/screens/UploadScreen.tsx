@@ -14,9 +14,30 @@ import { getImportApiBaseResolution } from "../engines/cloud/storageScaffold";
 import { NewAchievementDetectionResult } from "../contracts/newAchievements";
 import { detectNewAchievementsAfterImport } from "../presentation/newAchievements";
 import { createIdleUploadStatus, uploadStatusCopy } from "../presentation/placeholderUpload";
+import { getLatestCompletedImportStatus, saveLatestCompletedImportStatus } from "../state/importStatusState";
 import { Card, PrimaryButton, ScreenShell } from "./ui";
 
 const DEFAULT_USER_ID = "local-user";
+const IMPORT_LOG_PREFIX = "[DT][import]";
+
+function logImportEvent(
+  event: string,
+  payload: {
+    importId?: string | null;
+    stage?: string | null;
+    progressPercent?: number | null;
+    error?: string | null;
+    detail?: string | null;
+  } = {},
+): void {
+  console.log(`${IMPORT_LOG_PREFIX} ${event}`, {
+    importId: payload.importId ?? null,
+    stage: payload.stage ?? null,
+    progressPercent: payload.progressPercent ?? null,
+    error: payload.error ?? null,
+    detail: payload.detail ?? null,
+  });
+}
 
 export function UploadScreen() {
   const router = useRouter();
@@ -27,33 +48,103 @@ export function UploadScreen() {
   const importBaseResolution = getImportApiBaseResolution();
 
   useEffect(() => {
+    let active = true;
+    const loadLatestCompleted = async () => {
+      const persisted = await getLatestCompletedImportStatus();
+      if (!active || !persisted) {
+        return;
+      }
+      setLatestSummary(persisted);
+      setStatus((previous) => ({
+        ...previous,
+        phase: persisted.stage === "completed" ? "success" : previous.phase,
+        title: persisted.stage === "completed" ? "Import completed" : previous.title,
+        description:
+          persisted.stage === "completed"
+            ? `Completed import. ${persisted.summary?.matchedTrips ?? 0} matched payment groups.`
+            : previous.description,
+      }));
+      logImportEvent("persisted-completed-import-loaded", {
+        importId: persisted.importId,
+        stage: persisted.stage,
+        progressPercent: persisted.progressPercent,
+      });
+    };
+    void loadLatestCompleted();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
     if (!activeImportId) {
       return;
     }
     let active = true;
 
     const poll = async () => {
+      logImportEvent("poll-start", { importId: activeImportId });
       const response = await getImportStatus({
         userId: DEFAULT_USER_ID,
         importId: activeImportId,
       });
-      if (!active || !response.ok || !response.value) {
+      if (!active) {
+        return;
+      }
+      if (!response.ok || !response.value) {
+        logImportEvent("poll-fail", {
+          importId: activeImportId,
+          error: response.error ?? "Unknown polling error.",
+        });
+        setStatus((previous) => ({
+          ...previous,
+          phase: "error",
+          title: "Import failed",
+          description: response.error ?? "Could not fetch backend import status.",
+        }));
+        setActiveImportId(null);
         return;
       }
       const current = response.value;
+      logImportEvent("poll-update", {
+        importId: current.importId,
+        stage: current.stage,
+        progressPercent: current.progressPercent,
+      });
       setLatestSummary(current);
       setStatus((previous) => ({
         ...previous,
-        phase: current.stage === "failed" ? "error" : current.stage === "completed" ? "success" : "importing",
-        title: `Import ${current.stage}`,
-        description: `Stage: ${current.stage} (${current.progressPercent}%)`,
+        phase:
+          current.stage === "failed"
+            ? "error"
+            : current.stage === "completed"
+              ? "success"
+              : "importing",
+        title: current.stage === "completed" ? "Import completed" : `Import ${current.stage}`,
+        description:
+          current.stage === "completed"
+            ? `Import complete. ${current.summary?.matchedTrips ?? 0} matched payment groups.`
+            : `Stage: ${current.stage} (${current.progressPercent}%)`,
+        selectedFileName: current.sourceFileName ?? previous.selectedFileName,
       }));
 
       if (current.stage === "completed") {
+        await saveLatestCompletedImportStatus(current);
+        logImportEvent("poll-complete", {
+          importId: current.importId,
+          stage: current.stage,
+          progressPercent: current.progressPercent,
+        });
         setNewAchievements(detectNewAchievementsAfterImport(current.summary?.matchedTrips ?? 0));
         setActiveImportId(null);
       }
       if (current.stage === "failed") {
+        logImportEvent("poll-fail", {
+          importId: current.importId,
+          stage: current.stage,
+          progressPercent: current.progressPercent,
+          error: current.errors?.[0] ?? "Backend import failed.",
+        });
         setActiveImportId(null);
       }
     };
@@ -89,6 +180,7 @@ export function UploadScreen() {
         selectedFileName: asset.name,
         result: null,
       });
+      logImportEvent("session-create-start", { detail: asset.name });
 
       const sessionResult = await createImportSession({
         userId: DEFAULT_USER_ID,
@@ -96,8 +188,15 @@ export function UploadScreen() {
         mimeType: asset.mimeType ?? "application/zip",
       });
       if (!sessionResult.ok || !sessionResult.value) {
+        logImportEvent("session-create-fail", {
+          error: sessionResult.error ?? "Could not create backend import session.",
+        });
         throw new Error(sessionResult.error ?? "Could not create backend import session.");
       }
+      logImportEvent("session-create-success", {
+        importId: sessionResult.value.importId,
+        stage: sessionResult.value.stage,
+      });
 
       setStatus({
         phase: "importing",
@@ -106,6 +205,9 @@ export function UploadScreen() {
         selectedFileName: asset.name,
         result: null,
       });
+      logImportEvent("upload-start", {
+        importId: sessionResult.value.importId,
+      });
 
       const uploadResult = await uploadZipToS3({
         uploadUrl: sessionResult.value.uploadUrl,
@@ -113,16 +215,33 @@ export function UploadScreen() {
         mimeType: asset.mimeType ?? "application/zip",
       });
       if (!uploadResult.ok) {
+        logImportEvent("upload-fail", {
+          importId: sessionResult.value.importId,
+          error: uploadResult.error ?? "ZIP upload failed.",
+        });
         throw new Error(uploadResult.error ?? "ZIP upload failed.");
       }
+      logImportEvent("upload-success", {
+        importId: sessionResult.value.importId,
+      });
 
+      logImportEvent("confirm-start", {
+        importId: sessionResult.value.importId,
+      });
       const confirmResult = await confirmImportUpload({
         userId: DEFAULT_USER_ID,
         importId: sessionResult.value.importId,
       });
       if (!confirmResult.ok) {
+        logImportEvent("confirm-fail", {
+          importId: sessionResult.value.importId,
+          error: confirmResult.error ?? "Could not start backend processing.",
+        });
         throw new Error(confirmResult.error ?? "Could not start backend processing.");
       }
+      logImportEvent("confirm-success", {
+        importId: sessionResult.value.importId,
+      });
 
       setActiveImportId(sessionResult.value.importId);
       setStatus({
@@ -133,6 +252,10 @@ export function UploadScreen() {
         result: null,
       });
     } catch (error) {
+      logImportEvent("import-flow-fail", {
+        importId: activeImportId,
+        error: error instanceof Error ? error.message : "Unknown import failure",
+      });
       setStatus({
         phase: "error",
         title: "Import failed",

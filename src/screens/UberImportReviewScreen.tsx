@@ -1,12 +1,15 @@
 import { useEffect, useState } from "react";
 import { Text, View } from "react-native";
+import { ImportStatusResponse } from "../contracts/cloudStorage";
 import { initDatabase } from "../db/schema";
 import { getLatestUberImportReview, LatestUberImportReview } from "../engines/import/importPersistence";
+import { getLatestCompletedImportStatus } from "../state/importStatusState";
 import { formatGBP, formatUkDate, formatUkDateTime } from "../utils/format";
 import { Card, KeyValueRow, ScreenShell } from "./ui";
 
 export function UberImportReviewScreen() {
   const [review, setReview] = useState<LatestUberImportReview | null>(null);
+  const [backendStatusReview, setBackendStatusReview] = useState<ImportStatusResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -22,6 +25,15 @@ export function UberImportReviewScreen() {
           return;
         }
         setReview(latest);
+        if (!latest) {
+          const persisted = await getLatestCompletedImportStatus();
+          if (!active) {
+            return;
+          }
+          setBackendStatusReview(persisted);
+        } else {
+          setBackendStatusReview(null);
+        }
         setError(null);
       } catch {
         if (!active) {
@@ -52,7 +64,27 @@ export function UberImportReviewScreen() {
 
       {!loading && !review ? (
         <Card title="No Import Review Yet">
-          <Text>Import an Uber ZIP first, then review matching quality here.</Text>
+          {backendStatusReview ? (
+            <View style={{ gap: 4 }}>
+              <Text>Showing latest backend import summary.</Text>
+              <KeyValueRow label="Import ID" value={backendStatusReview.importId} />
+              <KeyValueRow label="Status" value={backendStatusReview.stage} />
+              <KeyValueRow label="Source file" value={backendStatusReview.sourceFileName} />
+              <KeyValueRow label="Started" value={formatUkDateTime(backendStatusReview.startedAt)} />
+              <KeyValueRow
+                label="Matched trips/payment groups"
+                value={String(backendStatusReview.summary?.matchedTrips ?? 0)}
+              />
+              <KeyValueRow label="Unmatched trips" value={String(backendStatusReview.summary?.unmatchedTrips ?? 0)} />
+              <KeyValueRow
+                label="Unmatched payments"
+                value={String(backendStatusReview.summary?.unmatchedPayments ?? 0)}
+              />
+              <KeyValueRow label="Ambiguous matches" value={String(backendStatusReview.summary?.ambiguousMatches ?? 0)} />
+            </View>
+          ) : (
+            <Text>Import an Uber ZIP first, then review matching quality here.</Text>
+          )}
         </Card>
       ) : null}
 
