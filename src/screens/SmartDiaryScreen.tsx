@@ -32,10 +32,6 @@ export function SmartDiaryScreen() {
       title="Smart Diary"
       subtitle="7 day rolling planner from favourites and live disruption monitoring"
     >
-      <Card title="Planner Basis" compact>
-        <Text>{planner.basisLabel}</Text>
-      </Card>
-
       <Card title="Next 7 Days">
         <View style={styles.daySelectorWrap}>
           {planner.days.map((day, index) => (
@@ -63,7 +59,7 @@ export function SmartDiaryScreen() {
 
       <Card title="Anomalies / Disruption">
         {selectedDay.anomalies.length === 0 ? (
-          <Text>No major disruption signals detected for this day.</Text>
+          <Text>Nothing notable to flag for this day.</Text>
         ) : (
           selectedDay.anomalies.map((anomaly) => <AnomalyRow key={anomaly.id} anomaly={anomaly} />)
         )}
@@ -71,7 +67,7 @@ export function SmartDiaryScreen() {
 
       <Card title="Planned Opportunities">
         {selectedDay.opportunities.length === 0 ? (
-          <Text>No high-signal windows detected from your monitored anchors for this day.</Text>
+          <Text>No notable diary windows found for this day.</Text>
         ) : (
           selectedDay.opportunities.map((opportunity) => (
             <OpportunityRow key={opportunity.id} opportunity={opportunity} />
@@ -83,11 +79,10 @@ export function SmartDiaryScreen() {
 }
 
 function AnomalyRow(props: { anomaly: DayAnomaly }) {
-  const severity = mapSeverity(props.anomaly.severity);
   const windowText = `${formatTime(props.anomaly.startsAt)}-${formatTime(props.anomaly.endsAt)}`;
   return (
     <View style={styles.rowWrap}>
-      <Text style={styles.rowTitle}>{`${severity} | ${windowText}`}</Text>
+      <Text style={styles.rowTitle}>{windowText}</Text>
       <Text>{props.anomaly.message}</Text>
     </View>
   );
@@ -110,16 +105,6 @@ function formatTime(input: string): string {
     return "--:--";
   }
   return date.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", hour12: false });
-}
-
-function mapSeverity(value: DayAnomaly["severity"]): string {
-  if (value === "high") {
-    return "High impact";
-  }
-  if (value === "warning") {
-    return "Warning";
-  }
-  return "Heads-up";
 }
 
 const styles = StyleSheet.create({
