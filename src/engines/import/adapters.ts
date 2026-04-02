@@ -1,7 +1,9 @@
 import { IntermediateTripRecord, ProviderDetectionResult } from "../../domain/importTypes";
+import { UberTripPaymentMatchArtifacts } from "../../contracts/uberMatching";
 import { ProviderCode } from "../../domain/types";
 import { detectProviderFromZip } from "./detectProvider";
 import { parseUberPrivacyZip } from "./parseUberExport";
+import { buildUberTripPaymentArtifactsFromZip } from "./uberTripPaymentMatching";
 
 export interface ImportFileDescriptor {
   fileName: string;
@@ -34,6 +36,12 @@ export interface ImportEngine {
 
 export async function parseUberExport(file: ImportFileDescriptor): Promise<ParsedImportBundle> {
   return parseUberPrivacyZip(file);
+}
+
+export async function buildUberTripPaymentMatchingArtifacts(
+  file: ImportFileDescriptor,
+): Promise<UberTripPaymentMatchArtifacts> {
+  return buildUberTripPaymentArtifactsFromZip(file);
 }
 
 export async function parseBoltExport(_file: ImportFileDescriptor): Promise<ParsedImportBundle> {
