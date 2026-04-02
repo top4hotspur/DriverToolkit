@@ -10,7 +10,7 @@ app.use(express.json());
 
 const PORT = 3000;
 const HOST = "0.0.0.0";
-const PUBLIC_BASE_URL = "http://192.168.0.191:3000";
+const PUBLIC_BASE_URL = "http://172.19.167.106:3000";
 const uploadsDir = path.join(__dirname, "uploads");
 if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
@@ -27,8 +27,9 @@ function normalizeHeader(header) {
     .trim()
     .replace(/^\uFEFF/, "")
     .toLowerCase()
-    .replace(/[\s-]+/g, "_")
-    .replace(/_+/g, "_");
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/_+/g, "_")
+    .replace(/^_+|_+$/g, "");
 }
 
 function parseCsvLine(line) {
@@ -161,17 +162,23 @@ function normalizeTimestampKey(value) {
   return `${parsed.toISOString().slice(0, 19)}Z`;
 }
 
-function resolveTimestampField(headers, preferredField) {
+function resolveFieldByAliases(headers, aliases) {
   const normalizedToRaw = new Map(
     headers.map((header) => [normalizeHeader(header), header])
   );
 
-  const preferredNormalized = normalizeHeader(preferredField);
-  if (normalizedToRaw.has(preferredNormalized)) {
-    return normalizedToRaw.get(preferredNormalized);
+  for (const alias of aliases) {
+    const normalizedAlias = normalizeHeader(alias);
+    if (normalizedToRaw.has(normalizedAlias)) {
+      return normalizedToRaw.get(normalizedAlias);
+    }
   }
 
   return null;
+}
+
+function resolveTimestampField(headers, preferredField, additionalAliases = []) {
+  return resolveFieldByAliases(headers, [preferredField, ...additionalAliases]);
 }
 
 function computeDateRange(rows, timestampField) {
@@ -206,7 +213,125 @@ function computeDateRange(rows, timestampField) {
   };
 }
 
-function computeFirstPassMatchingSummary(
+function normalizeUuid(value) {
+  if (value == null) {
+    return null;
+  }
+  const cleaned = String(value).trim().replace(/^"|"$/g, "").toLowerCase();
+  if (!cleaned) {
+    return null;
+  }
+  return cleaned;
+}
+
+function isWithinRange(timestampMs, range) {
+  if (!range || typeof timestampMs !== "number") {
+    return false;
+  }
+  const startMs = Date.parse(range.startAt ?? "");
+  const endMs = Date.parse(range.endAt ?? "");
+  if (Number.isNaN(startMs) || Number.isNaN(endMs)) {
+    return false;
+  }
+  return timestampMs >= startMs && timestampMs <= endMs;
+}
+
+function buildPaymentGroupsByTripUuid(paymentRows, paymentUuidField, paymentTimestampField) {
+  const groups = new Map();
+  for (const row of paymentRows) {
+    const uuid = normalizeUuid(row[paymentUuidField]);
+    if (!uuid) {
+      continue;
+    }
+    const amountRaw = getRowValueByAliases(row, ["local_amount", "amount"]);
+    const amount = Number.parseFloat(String(amountRaw ?? "0"));
+    const timestampParsed = parseDateValue(row[paymentTimestampField]);
+    const entry = groups.get(uuid) ?? {
+      tripUuid: uuid,
+      rows: [],
+      timestampMs: null,
+      timestampIso: null,
+      financialTotal: 0,
+    };
+    entry.rows.push(row);
+    if (!Number.isNaN(amount)) {
+      entry.financialTotal += amount;
+    }
+    if (timestampParsed) {
+      const currentMs = timestampParsed.getTime();
+      if (entry.timestampMs == null || currentMs < entry.timestampMs) {
+        entry.timestampMs = currentMs;
+        entry.timestampIso = timestampParsed.toISOString();
+      }
+    }
+    groups.set(uuid, entry);
+  }
+  return Array.from(groups.values());
+}
+
+function findNearestAnalyticsEvent(analyticsRowsSorted, targetMs, toleranceMs) {
+  if (!Array.isArray(analyticsRowsSorted) || analyticsRowsSorted.length === 0) {
+    return null;
+  }
+
+  let lo = 0;
+  let hi = analyticsRowsSorted.length - 1;
+  while (lo < hi) {
+    const mid = Math.floor((lo + hi) / 2);
+    if (analyticsRowsSorted[mid].eventMs < targetMs) {
+      lo = mid + 1;
+    } else {
+      hi = mid;
+    }
+  }
+
+  const candidates = [];
+  if (analyticsRowsSorted[lo]) {
+    candidates.push(analyticsRowsSorted[lo]);
+  }
+  if (analyticsRowsSorted[lo - 1]) {
+    candidates.push(analyticsRowsSorted[lo - 1]);
+  }
+  if (analyticsRowsSorted[lo + 1]) {
+    candidates.push(analyticsRowsSorted[lo + 1]);
+  }
+
+  let nearest = null;
+  let nearestDiff = Number.POSITIVE_INFINITY;
+  for (const candidate of candidates) {
+    const diff = Math.abs(candidate.eventMs - targetMs);
+    if (diff < nearestDiff) {
+      nearest = candidate;
+      nearestDiff = diff;
+    }
+  }
+
+  if (!nearest || nearestDiff > toleranceMs) {
+    return null;
+  }
+
+  return {
+    event: nearest,
+    diffMs: nearestDiff,
+  };
+}
+
+function getRowValueByAliases(row, aliases) {
+  if (!row || typeof row !== "object") {
+    return null;
+  }
+  const keys = Object.keys(row);
+  const normalized = new Map(keys.map((key) => [normalizeHeader(key), key]));
+  for (const alias of aliases) {
+    const rawKey = normalized.get(normalizeHeader(alias));
+    if (rawKey != null) {
+      return row[rawKey];
+    }
+  }
+  return null;
+}
+
+function computeTimestampFallbackMatchingSummary(
   tripRows,
   paymentRows,
   tripTimestampField,
@@ -275,6 +400,7 @@ function computeFirstPassMatchingSummary(
   }
 
   return {
+    matchingMode: "timestamp-fallback",
     matchedTrips,
     unmatchedTrips,
     unmatchedPayments,
@@ -286,11 +412,225 @@ function computeFirstPassMatchingSummary(
       validPaymentTimestamps,
       uniqueTripTimestamps: tripsByTimestamp.size,
       uniquePaymentTimestamps: paymentsByTimestamp.size,
+      uuidMatchedTrips: 0,
+      uuidMissingTrips: safeTripRows.length,
+      tripUuidFieldUsed: null,
+      paymentUuidFieldUsed: null,
     },
   };
 }
 
-function summarizeCsvEntry(zip, entryName, preferredTimestampField) {
+function computeFirstPassMatchingSummary(
+  tripRows,
+  paymentRows,
+  tripTimestampField,
+  paymentTimestampField,
+  analyticsRows,
+  analyticsTimestampField,
+  tripHeaders,
+  paymentHeaders
+) {
+  const safeTripRows = Array.isArray(tripRows) ? tripRows : [];
+  const safePaymentRows = Array.isArray(paymentRows) ? paymentRows : [];
+  const paymentUuidField = resolveFieldByAliases(paymentHeaders ?? [], [
+    "trip_uuid",
+    "trip uuid",
+    "uuid",
+    "trip_id",
+    "trip id",
+  ]);
+
+  const analyticsEvents = (Array.isArray(analyticsRows) ? analyticsRows : [])
+    .map((row) => {
+      const eventDate = parseDateValue(
+        analyticsTimestampField ? row[analyticsTimestampField] : null
+      );
+      if (!eventDate) {
+        return null;
+      }
+      return {
+        raw: row,
+        eventMs: eventDate.getTime(),
+        eventIso: eventDate.toISOString(),
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.eventMs - b.eventMs);
+
+  const analyticsCoverageRange =
+    analyticsEvents.length > 0
+      ? {
+          startAt: analyticsEvents[0].eventIso,
+          endAt: analyticsEvents[analyticsEvents.length - 1].eventIso,
+        }
+      : null;
+
+  if (!paymentUuidField || !tripTimestampField || !paymentTimestampField) {
+    const fallback = computeTimestampFallbackMatchingSummary(
+      safeTripRows,
+      safePaymentRows,
+      tripTimestampField,
+      paymentTimestampField
+    );
+    return {
+      ...fallback,
+      analyticsCoverageRange,
+      geoLinkedTrips: 0,
+      toleranceUsedSeconds: 60,
+      geoLinkedDataset: [],
+      diagnostics: {
+        ...fallback.diagnostics,
+        tripUuidFieldUsed: null,
+        paymentUuidFieldUsed: paymentUuidField,
+        tripsInAnalyticsWindow: 0,
+        paymentGroupsInAnalyticsWindow: 0,
+        groupedTripsMatchedToPayments: 0,
+      },
+    };
+  }
+
+  const paymentGroups = buildPaymentGroupsByTripUuid(
+    safePaymentRows,
+    paymentUuidField,
+    paymentTimestampField
+  );
+  let validPaymentUuidRows = paymentGroups.reduce(
+    (sum, group) => sum + group.rows.length,
+    0
+  );
+
+  const tripsWithTs = safeTripRows
+    .map((tripRow) => {
+      const parsed = parseDateValue(tripTimestampField ? tripRow[tripTimestampField] : null);
+      return {
+        row: tripRow,
+        timestampMs: parsed ? parsed.getTime() : null,
+        timestampIso: parsed ? parsed.toISOString() : null,
+      };
+    })
+    .filter((entry) => entry.timestampMs != null);
+
+  const tripsInAnalyticsWindow = tripsWithTs.filter((trip) =>
+    isWithinRange(trip.timestampMs, analyticsCoverageRange)
+  );
+  const paymentGroupsInAnalyticsWindow = paymentGroups.filter((group) =>
+    isWithinRange(group.timestampMs, analyticsCoverageRange)
+  );
+
+  const tripsByTimestamp = new Map();
+  for (const trip of tripsInAnalyticsWindow) {
+    const key = normalizeTimestampKey(trip.timestampIso);
+    if (!key) {
+      continue;
+    }
+    const group = tripsByTimestamp.get(key) ?? [];
+    group.push(trip);
+    tripsByTimestamp.set(key, group);
+  }
+
+  const paymentGroupsByTimestamp = new Map();
+  for (const paymentGroup of paymentGroupsInAnalyticsWindow) {
+    const key = normalizeTimestampKey(paymentGroup.timestampIso);
+    if (!key) {
+      continue;
+    }
+    const group = paymentGroupsByTimestamp.get(key) ?? [];
+    group.push(paymentGroup);
+    paymentGroupsByTimestamp.set(key, group);
+  }
+
+  let matchedTrips = 0;
+  let unmatchedTrips = 0;
+  let ambiguousMatches = 0;
+  const groupedMatchedPaymentKeys = new Set();
+  const groupedMatches = [];
+
+  for (const [timestampKey, tripGroup] of tripsByTimestamp.entries()) {
+    const paymentGroup = paymentGroupsByTimestamp.get(timestampKey);
+    if (!paymentGroup || paymentGroup.length === 0) {
+      unmatchedTrips += tripGroup.length;
+      continue;
+    }
+    if (tripGroup.length === 1 && paymentGroup.length === 1) {
+      matchedTrips += 1;
+      groupedMatchedPaymentKeys.add(timestampKey);
+      groupedMatches.push({
+        trip: tripGroup[0],
+        paymentGroup: paymentGroup[0],
+      });
+      continue;
+    }
+    ambiguousMatches += Math.max(tripGroup.length, paymentGroup.length);
+  }
+
+  const unmatchedPayments = Array.from(paymentGroupsByTimestamp.keys()).filter(
+    (key) => !groupedMatchedPaymentKeys.has(key)
+  ).length;
+
+  const toleranceMs = 60_000;
+  const geoLinkedDataset = [];
+  for (const item of groupedMatches) {
+    const nearest = findNearestAnalyticsEvent(
+      analyticsEvents,
+      item.trip.timestampMs,
+      toleranceMs
+    );
+    if (!nearest) {
+      continue;
+    }
+    geoLinkedDataset.push({
+      tripRequestTimestamp: item.trip.timestampIso,
+      paymentGroupedTimestamp: item.paymentGroup.timestampIso,
+      paymentGroupedFinancialTotal: Math.round(item.paymentGroup.financialTotal * 100) / 100,
+      analyticsEventTimestamp: nearest.event.eventIso,
+      latitude: Number(getRowValueByAliases(nearest.event.raw, ["latitude"])) || 0,
+      longitude: Number(getRowValueByAliases(nearest.event.raw, ["longitude"])) || 0,
+      speedGps: Number(getRowValueByAliases(nearest.event.raw, ["speed_gps", "speed"])) || 0,
+      analyticsEventType: String(
+        getRowValueByAliases(nearest.event.raw, ["analytics_event_type", "event_type"]) ??
+          "unknown"
+      ),
+      matchConfidence: nearest.diffMs <= 15_000 ? "high" : "medium",
+      toleranceUsedSeconds: 60,
+    });
+  }
+
+  return {
+    matchingMode: "uuid",
+    matchedTrips,
+    unmatchedTrips,
+    unmatchedPayments,
+    ambiguousMatches,
+    analyticsCoverageRange,
+    geoLinkedTrips: geoLinkedDataset.length,
+    toleranceUsedSeconds: 60,
+    geoLinkedDataset,
+    diagnostics: {
+      tripsConsidered: safeTripRows.length,
+      paymentsConsidered: safePaymentRows.length,
+      validTripTimestamps: 0,
+      validPaymentTimestamps: 0,
+      uniqueTripTimestamps: 0,
+      uniquePaymentTimestamps: 0,
+      validPaymentUuidRows,
+      uniquePaymentTripUuids: paymentGroups.length,
+      uuidMatchedTrips: matchedTrips,
+      uuidMissingTrips: 0,
+      tripUuidFieldUsed: null,
+      paymentUuidFieldUsed: paymentUuidField,
+      tripsInAnalyticsWindow: tripsInAnalyticsWindow.length,
+      paymentGroupsInAnalyticsWindow: paymentGroupsInAnalyticsWindow.length,
+      groupedTripsMatchedToPayments: matchedTrips,
+    },
+  };
+}
+
+function summarizeCsvEntry(
+  zip,
+  entryName,
+  preferredTimestampField,
+  additionalTimestampAliases = []
+) {
   if (!entryName) {
     return {
       found: false,
@@ -331,7 +671,8 @@ function summarizeCsvEntry(zip, entryName, preferredTimestampField) {
   const parsed = parseCsvText(csvText);
   const timestampFieldUsed = resolveTimestampField(
     parsed.headers,
-    preferredTimestampField
+    preferredTimestampField,
+    additionalTimestampAliases
   );
   const dateRange = computeDateRange(parsed.dataRows, timestampFieldUsed);
 
@@ -600,7 +941,8 @@ app.post("/api/imports/:importId/confirm", (req, res) => {
     const analyticsSummary = summarizeCsvEntry(
       zip,
       analyticsEntryName,
-      "event_time_utc"
+      "event_time_utc",
+      ["event_time_utc", "event_time_utc_", "event_time"]
     );
     stageReached = "csv_extract_complete";
     console.log("[IMPORT][confirm] stage=csv_extract_complete");
@@ -609,7 +951,11 @@ app.post("/api/imports/:importId/confirm", (req, res) => {
       tripsSummary.dataRows,
       paymentsSummary.dataRows,
       tripsSummary.timestampFieldUsed,
-      paymentsSummary.timestampFieldUsed
+      paymentsSummary.timestampFieldUsed,
+      analyticsSummary.dataRows,
+      analyticsSummary.timestampFieldUsed,
+      tripsSummary.headers,
+      paymentsSummary.headers
     );
     stageReached = "parse_complete";
     console.log("[IMPORT][confirm] stage=parse_complete");
@@ -623,10 +969,28 @@ app.post("/api/imports/:importId/confirm", (req, res) => {
     console.log(
       `[IMPORT][confirm] csv analytics rowCount=${analyticsSummary.rowCount} timestampField=${analyticsSummary.timestampFieldUsed} dateRange=${JSON.stringify(analyticsSummary.dateRange)}`
     );
+    if (analyticsSummary.timestampFieldUsed) {
+      console.log(
+        `[IMPORT][confirm] analytics timestamp detected=${analyticsSummary.timestampFieldUsed}`
+      );
+    }
     stageReached = "date_ranges_complete";
     console.log("[IMPORT][confirm] stage=date_ranges_complete");
+    console.log(`[IMPORT][confirm] matching-mode=${matchingSummary.matchingMode}`);
+    console.log(
+      `[IMPORT][confirm] analyticsCoverageStart=${matchingSummary.analyticsCoverageRange?.startAt ?? "null"} analyticsCoverageEnd=${matchingSummary.analyticsCoverageRange?.endAt ?? "null"}`
+    );
+    console.log(
+      `[IMPORT][confirm] tripsInAnalyticsWindow=${matchingSummary.diagnostics.tripsInAnalyticsWindow ?? 0} paymentGroupsInAnalyticsWindow=${matchingSummary.diagnostics.paymentGroupsInAnalyticsWindow ?? 0} groupedTripsMatchedToPayments=${matchingSummary.diagnostics.groupedTripsMatchedToPayments ?? 0}`
+    );
+    console.log(
+      `[IMPORT][confirm] geoLinkedTrips=${matchingSummary.geoLinkedTrips ?? 0} nearestAnalyticsToleranceSeconds=${matchingSummary.toleranceUsedSeconds ?? 60}`
+    );
     console.log(
       `[IMPORT][confirm] matching tripsConsidered=${matchingSummary.diagnostics.tripsConsidered} paymentsConsidered=${matchingSummary.diagnostics.paymentsConsidered} tripTimestampField=${tripsSummary.timestampFieldUsed} paymentTimestampField=${paymentsSummary.timestampFieldUsed}`
+    );
+    console.log(
+      `[IMPORT][confirm] matching uuidMatchedTrips=${matchingSummary.diagnostics.uuidMatchedTrips ?? 0} uuidMissingTrips=${matchingSummary.diagnostics.uuidMissingTrips ?? 0} tripUuidField=${matchingSummary.diagnostics.tripUuidFieldUsed ?? "null"} paymentUuidField=${matchingSummary.diagnostics.paymentUuidFieldUsed ?? "null"}`
     );
     console.log(
       `[IMPORT][confirm] matching matchedTrips=${matchingSummary.matchedTrips} unmatchedTrips=${matchingSummary.unmatchedTrips} unmatchedPayments=${matchingSummary.unmatchedPayments} ambiguousMatches=${matchingSummary.ambiguousMatches}`
@@ -650,6 +1014,13 @@ app.post("/api/imports/:importId/confirm", (req, res) => {
       unmatchedTrips: matchingSummary.unmatchedTrips,
       unmatchedPayments: matchingSummary.unmatchedPayments,
       ambiguousMatches: matchingSummary.ambiguousMatches,
+      analyticsCoverageRange: matchingSummary.analyticsCoverageRange,
+      geoLinkedTrips: matchingSummary.geoLinkedTrips,
+      geoEligibleTrips: matchingSummary.diagnostics.tripsInAnalyticsWindow ?? 0,
+      notGeoEligibleTrips:
+        tripsSummary.rowCount -
+        (matchingSummary.diagnostics.tripsInAnalyticsWindow ?? 0),
+      geoLinkedDatasetSample: (matchingSummary.geoLinkedDataset ?? []).slice(0, 5),
       parsedFileDetails: {
         trips: {
           selectedFileName: tripsEntryName,
