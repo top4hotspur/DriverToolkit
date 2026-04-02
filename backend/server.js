@@ -212,12 +212,14 @@ function computeFirstPassMatchingSummary(
   tripTimestampField,
   paymentTimestampField
 ) {
+  const safeTripRows = Array.isArray(tripRows) ? tripRows : [];
+  const safePaymentRows = Array.isArray(paymentRows) ? paymentRows : [];
   const tripsByTimestamp = new Map();
   const paymentsByTimestamp = new Map();
   let validTripTimestamps = 0;
   let validPaymentTimestamps = 0;
 
-  for (const tripRow of tripRows) {
+  for (const tripRow of safeTripRows) {
     const key = normalizeTimestampKey(tripRow[tripTimestampField]);
     if (!key) {
       continue;
@@ -228,7 +230,7 @@ function computeFirstPassMatchingSummary(
     tripsByTimestamp.set(key, list);
   }
 
-  for (const paymentRow of paymentRows) {
+  for (const paymentRow of safePaymentRows) {
     const key = normalizeTimestampKey(paymentRow[paymentTimestampField]);
     if (!key) {
       continue;
@@ -278,8 +280,8 @@ function computeFirstPassMatchingSummary(
     unmatchedPayments,
     ambiguousMatches,
     diagnostics: {
-      tripsConsidered: tripRows.length,
-      paymentsConsidered: paymentRows.length,
+      tripsConsidered: safeTripRows.length,
+      paymentsConsidered: safePaymentRows.length,
       validTripTimestamps,
       validPaymentTimestamps,
       uniqueTripTimestamps: tripsByTimestamp.size,
@@ -295,6 +297,7 @@ function summarizeCsvEntry(zip, entryName, preferredTimestampField) {
       headers: [],
       rowCount: 0,
       sampleRows: [],
+      dataRows: [],
       timestampFieldUsed: null,
       dateRange: null,
     };
@@ -307,12 +310,24 @@ function summarizeCsvEntry(zip, entryName, preferredTimestampField) {
       headers: [],
       rowCount: 0,
       sampleRows: [],
+      dataRows: [],
       timestampFieldUsed: null,
       dateRange: null,
     };
   }
 
   const csvText = entry.getData().toString("utf8");
+  if (!csvText || csvText.trim().length === 0) {
+    return {
+      found: true,
+      headers: [],
+      rowCount: 0,
+      sampleRows: [],
+      dataRows: [],
+      timestampFieldUsed: null,
+      dateRange: null,
+    };
+  }
   const parsed = parseCsvText(csvText);
   const timestampFieldUsed = resolveTimestampField(
     parsed.headers,
@@ -325,6 +340,7 @@ function summarizeCsvEntry(zip, entryName, preferredTimestampField) {
     headers: parsed.headers,
     rowCount: parsed.rowCount,
     sampleRows: parsed.sampleRows,
+    dataRows: parsed.dataRows,
     timestampFieldUsed,
     dateRange,
   };
@@ -497,6 +513,7 @@ app.put(
 app.post("/api/imports/:importId/confirm", (req, res) => {
   const { importId } = req.params;
   const record = imports.get(importId);
+  let stageReached = "start";
 
   if (!record) {
     return res.status(404).json({ error: "Import session not found" });
@@ -565,7 +582,11 @@ app.post("/api/imports/:importId/confirm", (req, res) => {
       return !selectedSet.has(name);
     }).length;
     console.log(`[IMPORT][confirm] ignoredFilesCount=${ignoredFilesCount}`);
+    stageReached = "detection_complete";
+    console.log("[IMPORT][confirm] stage=detection_complete");
 
+    stageReached = "csv_extract_start";
+    console.log("[IMPORT][confirm] stage=csv_extract_start");
     const tripsSummary = summarizeCsvEntry(
       zip,
       tripsEntryName,
@@ -581,6 +602,8 @@ app.post("/api/imports/:importId/confirm", (req, res) => {
       analyticsEntryName,
       "event_time_utc"
     );
+    stageReached = "csv_extract_complete";
+    console.log("[IMPORT][confirm] stage=csv_extract_complete");
 
     const matchingSummary = computeFirstPassMatchingSummary(
       tripsSummary.dataRows,
@@ -588,6 +611,8 @@ app.post("/api/imports/:importId/confirm", (req, res) => {
       tripsSummary.timestampFieldUsed,
       paymentsSummary.timestampFieldUsed
     );
+    stageReached = "parse_complete";
+    console.log("[IMPORT][confirm] stage=parse_complete");
 
     console.log(
       `[IMPORT][confirm] csv trips rowCount=${tripsSummary.rowCount} timestampField=${tripsSummary.timestampFieldUsed} dateRange=${JSON.stringify(tripsSummary.dateRange)}`
@@ -598,12 +623,16 @@ app.post("/api/imports/:importId/confirm", (req, res) => {
     console.log(
       `[IMPORT][confirm] csv analytics rowCount=${analyticsSummary.rowCount} timestampField=${analyticsSummary.timestampFieldUsed} dateRange=${JSON.stringify(analyticsSummary.dateRange)}`
     );
+    stageReached = "date_ranges_complete";
+    console.log("[IMPORT][confirm] stage=date_ranges_complete");
     console.log(
       `[IMPORT][confirm] matching tripsConsidered=${matchingSummary.diagnostics.tripsConsidered} paymentsConsidered=${matchingSummary.diagnostics.paymentsConsidered} tripTimestampField=${tripsSummary.timestampFieldUsed} paymentTimestampField=${paymentsSummary.timestampFieldUsed}`
     );
     console.log(
       `[IMPORT][confirm] matching matchedTrips=${matchingSummary.matchedTrips} unmatchedTrips=${matchingSummary.unmatchedTrips} unmatchedPayments=${matchingSummary.unmatchedPayments} ambiguousMatches=${matchingSummary.ambiguousMatches}`
     );
+    stageReached = "matching_complete";
+    console.log("[IMPORT][confirm] stage=matching_complete");
 
     record.summary = {
       ...(record.summary ?? {}),
@@ -642,6 +671,8 @@ app.post("/api/imports/:importId/confirm", (req, res) => {
         },
       },
     };
+    stageReached = "summary_written";
+    console.log("[IMPORT][confirm] stage=summary_written");
     console.log(
       `[IMPORT][confirm] summary=${JSON.stringify(record.summary)}`
     );
@@ -651,6 +682,8 @@ app.post("/api/imports/:importId/confirm", (req, res) => {
     record.updatedAt = nowIso();
 
     imports.set(importId, record);
+    stageReached = "response_ready";
+    console.log("[IMPORT][confirm] stage=response_ready");
 
     return res.json({
       ok: true,
@@ -665,10 +698,16 @@ app.post("/api/imports/:importId/confirm", (req, res) => {
       error instanceof Error ? error.message : "ZIP detection failed.",
     ];
     imports.set(importId, record);
+    console.error(
+      `[IMPORT][confirm][error] importId=${importId} stage=${stageReached} message=${error instanceof Error ? error.message : "confirm_failed"}`
+    );
+    console.error(
+      `[IMPORT][confirm][error] stack=${error instanceof Error && error.stack ? error.stack : "no_stack"}`
+    );
     return res.status(500).json({
-      ok: false,
-      status: "failed",
-      error: error instanceof Error ? error.message : "ZIP detection failed.",
+      error: "confirm_failed",
+      message: "Import confirmation failed during backend processing.",
+      stage: stageReached,
     });
   }
 });
