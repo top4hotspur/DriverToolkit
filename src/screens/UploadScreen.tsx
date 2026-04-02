@@ -209,7 +209,9 @@ export function UploadScreen() {
 
 function BackendImportStatusSummary(props: { status: ImportStatusResponse }) {
   const { status } = props;
-  const summary = status.summary;
+  const summary = status.summary ?? null;
+  const warnings = Array.isArray(status.warnings) ? status.warnings : [];
+  const errors = Array.isArray(status.errors) ? status.errors : [];
 
   return (
     <View style={{ marginTop: 8, gap: 4 }}>
@@ -237,11 +239,13 @@ function BackendImportStatusSummary(props: { status: ImportStatusResponse }) {
           )}
           <Text>{`Location-enriched trips: ${summary.locationEnrichedTrips}`}</Text>
         </View>
-      ) : null}
-      {status.warnings.map((warning, index) => (
+      ) : (
+        <Text>Waiting for backend summary details...</Text>
+      )}
+      {warnings.map((warning, index) => (
         <Text key={`warning-${index}`}>{`Warning: ${warning}`}</Text>
       ))}
-      {status.errors.map((error, index) => (
+      {errors.map((error, index) => (
         <Text key={`error-${index}`}>{`Error: ${error}`}</Text>
       ))}
     </View>
