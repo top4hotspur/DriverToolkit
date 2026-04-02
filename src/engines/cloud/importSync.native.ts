@@ -3,7 +3,7 @@ import {
   CreateImportSessionResponse,
   ImportStatusResponse,
 } from "../../contracts/cloudStorage";
-import { getCloudSyncConfig } from "./storageScaffold";
+import { getImportApiBaseUrl, getMissingImportConfigKeys } from "./storageScaffold";
 
 export type ImportSyncResult<T> = {
   ok: boolean;
@@ -16,16 +16,17 @@ export async function createImportSession(args: {
   sourceFileName: string;
   mimeType: string;
 }): Promise<ImportSyncResult<CreateImportSessionResponse>> {
-  const config = getCloudSyncConfig();
-  if (!config) {
+  const apiBaseUrl = getImportApiBaseUrl();
+  if (!apiBaseUrl) {
+    const missing = getMissingImportConfigKeys();
     return {
       ok: false,
-      error: "Cloud import endpoint is not configured.",
+      error: `Cloud import endpoint is not configured. Missing: ${missing.join(", ")}.`,
     };
   }
 
   try {
-    const response = await fetch(`${config.apiBaseUrl}/api/imports/session`, {
+    const response = await fetch(`${apiBaseUrl}/api/imports/session`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -36,7 +37,10 @@ export async function createImportSession(args: {
       }),
     });
     if (!response.ok) {
-      return { ok: false, error: `Failed to create import session (${response.status}).` };
+      return {
+        ok: false,
+        error: `Create import session route unavailable (${response.status}) at ${apiBaseUrl}/api/imports/session.`,
+      };
     }
     return { ok: true, value: (await response.json()) as CreateImportSessionResponse };
   } catch (error) {
@@ -75,19 +79,23 @@ export async function uploadZipToS3(args: {
 }
 
 export async function confirmImportUpload(args: ConfirmImportUploadRequest): Promise<ImportSyncResult<true>> {
-  const config = getCloudSyncConfig();
-  if (!config) {
-    return { ok: false, error: "Cloud import endpoint is not configured." };
+  const apiBaseUrl = getImportApiBaseUrl();
+  if (!apiBaseUrl) {
+    const missing = getMissingImportConfigKeys();
+    return { ok: false, error: `Cloud import endpoint is not configured. Missing: ${missing.join(", ")}.` };
   }
 
   try {
-    const response = await fetch(`${config.apiBaseUrl}/api/imports/${encodeURIComponent(args.importId)}/confirm`, {
+    const response = await fetch(`${apiBaseUrl}/api/imports/${encodeURIComponent(args.importId)}/confirm`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(args),
     });
     if (!response.ok) {
-      return { ok: false, error: `Import confirmation failed (${response.status}).` };
+      return {
+        ok: false,
+        error: `Confirm upload route unavailable (${response.status}) at ${apiBaseUrl}/api/imports/${args.importId}/confirm.`,
+      };
     }
     return { ok: true, value: true };
   } catch (error) {
@@ -102,17 +110,21 @@ export async function getImportStatus(args: {
   userId: string;
   importId: string;
 }): Promise<ImportSyncResult<ImportStatusResponse>> {
-  const config = getCloudSyncConfig();
-  if (!config) {
-    return { ok: false, error: "Cloud import endpoint is not configured." };
+  const apiBaseUrl = getImportApiBaseUrl();
+  if (!apiBaseUrl) {
+    const missing = getMissingImportConfigKeys();
+    return { ok: false, error: `Cloud import endpoint is not configured. Missing: ${missing.join(", ")}.` };
   }
 
   try {
     const response = await fetch(
-      `${config.apiBaseUrl}/api/imports/${encodeURIComponent(args.importId)}/status?userId=${encodeURIComponent(args.userId)}`,
+      `${apiBaseUrl}/api/imports/${encodeURIComponent(args.importId)}/status?userId=${encodeURIComponent(args.userId)}`,
     );
     if (!response.ok) {
-      return { ok: false, error: `Failed to fetch import status (${response.status}).` };
+      return {
+        ok: false,
+        error: `Status route unavailable (${response.status}) at ${apiBaseUrl}/api/imports/${args.importId}/status.`,
+      };
     }
     return { ok: true, value: (await response.json()) as ImportStatusResponse };
   } catch (error) {

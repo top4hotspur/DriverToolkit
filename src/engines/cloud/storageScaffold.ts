@@ -9,21 +9,47 @@ export interface CloudSyncConfig {
 
 // Scaffold-first: local save remains source of truth, cloud sync is best-effort.
 export function getCloudSyncConfig(): CloudSyncConfig | null {
-  const apiBaseUrl = process.env.EXPO_PUBLIC_CLOUD_SYNC_BASE_URL;
-  const region = process.env.EXPO_PUBLIC_AWS_REGION;
-  const receiptsBucket = process.env.EXPO_PUBLIC_AWS_RECEIPTS_BUCKET;
-  const importsBucket = process.env.EXPO_PUBLIC_AWS_IMPORTS_BUCKET;
-
-  if (!apiBaseUrl || !region || !receiptsBucket) {
+  const apiBaseUrl = getImportApiBaseUrl();
+  if (!apiBaseUrl) {
     return null;
   }
 
   return {
     apiBaseUrl,
-    region,
-    receiptsBucket,
-    importsBucket: importsBucket ?? receiptsBucket,
+    region: process.env.EXPO_PUBLIC_AWS_REGION ?? "eu-west-1",
+    receiptsBucket: process.env.EXPO_PUBLIC_AWS_RECEIPTS_BUCKET ?? "driver-toolkit-receipts",
+    importsBucket:
+      process.env.EXPO_PUBLIC_AWS_IMPORTS_BUCKET ??
+      process.env.EXPO_PUBLIC_AWS_RECEIPTS_BUCKET ??
+      "driver-toolkit-imports",
   };
+}
+
+export function getImportApiBaseUrl(): string | null {
+  const raw =
+    process.env.EXPO_PUBLIC_IMPORT_API_BASE_URL ??
+    process.env.EXPO_PUBLIC_CLOUD_SYNC_BASE_URL ??
+    process.env.EXPO_PUBLIC_API_BASE_URL ??
+    null;
+  if (!raw || raw.trim().length === 0) {
+    return null;
+  }
+  return raw.replace(/\/+$/, "");
+}
+
+export function getMissingImportConfigKeys(): string[] {
+  const missing: string[] = [];
+  const hasImportBase = Boolean(
+    (process.env.EXPO_PUBLIC_IMPORT_API_BASE_URL ?? "").trim() ||
+      (process.env.EXPO_PUBLIC_CLOUD_SYNC_BASE_URL ?? "").trim() ||
+      (process.env.EXPO_PUBLIC_API_BASE_URL ?? "").trim(),
+  );
+  if (!hasImportBase) {
+    missing.push(
+      "EXPO_PUBLIC_IMPORT_API_BASE_URL (or EXPO_PUBLIC_CLOUD_SYNC_BASE_URL / EXPO_PUBLIC_API_BASE_URL)",
+    );
+  }
+  return missing;
 }
 
 export async function buildReceiptUploadIntent(args: {

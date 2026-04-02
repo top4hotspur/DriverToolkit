@@ -134,7 +134,10 @@ export function UploadScreen() {
       setStatus({
         phase: "error",
         title: "Import failed",
-        description: error instanceof Error ? error.message : "Could not read the selected file.",
+        description:
+          error instanceof Error
+            ? error.message
+            : "Could not start cloud import. Check API endpoint configuration.",
         selectedFileName: null,
         result: null,
       });
