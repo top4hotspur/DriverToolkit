@@ -1,4 +1,13 @@
-﻿import { ExpenseInput, ExpenseRecord, ExpenseSaveResult, LocalSyncStatus, ReceiptFileMetadata } from "../contracts/expenses";
+import {
+  AttachReceiptInput,
+  ExpenseDetailRecord,
+  ExpenseInput,
+  ExpenseRecord,
+  ExpenseSaveResult,
+  ExpenseUpdateInput,
+  LocalSyncStatus,
+  ReceiptFileMetadata,
+} from "../contracts/expenses";
 import { getDb } from "../db/client.native";
 import { canSyncToCloud, syncExpenseMetadataToCloud, uploadReceiptToCloud } from "../engines/cloud/expenseSync";
 import { getVehicleCostSettings, saveVehicleCostSettings } from "./vehicleCostState.native";
@@ -102,7 +111,6 @@ export async function saveExpense(input: ExpenseInput): Promise<ExpenseSaveResul
     fuelPriceUpdated = true;
   }
 
-  // Fire-and-forget sync so the UX confirms local save immediately.
   void syncExpenseToCloud(expenseId);
 
   return {
@@ -163,6 +171,246 @@ export async function listRecentExpenses(limit = 20): Promise<ExpenseRecord[]> {
   );
 
   return rows;
+}
+
+export async function getExpenseDetail(expenseId: string): Promise<ExpenseDetailRecord | null> {
+  const db = await getDb();
+  const row = await db.getFirstAsync<ExpenseDetailRecord>(
+    `
+      SELECT
+        e.id as id,
+        e.user_id as userId,
+        e.category as category,
+        COALESCE(e.expense_type, 'upload_receipt') as expenseType,
+        e.payment_method as paymentMethod,
+        e.amount as amountGbp,
+        e.occurred_on as expenseDate,
+        e.notes as note,
+        e.receipt_required_status as receiptRequiredStatus,
+        e.receipt_source_type as receiptSourceType,
+        e.receipt_file_id as receiptFileId,
+        e.local_receipt_uri as localReceiptUri,
+        e.mime_type as mimeType,
+        e.original_file_name as originalFileName,
+        e.file_size_bytes as fileSizeBytes,
+        e.fuel_litres as fuelLitres,
+        e.fuel_price_per_litre as fuelPricePerLitre,
+        e.fuel_total as fuelTotal,
+        e.created_at as createdAt,
+        e.updated_at as updatedAt,
+        e.local_sync_status as localSyncStatus,
+        e.cloud_synced_at as cloudSyncedAt,
+        r.upload_status as receiptUploadStatus,
+        r.cloud_object_key as receiptCloudObjectKey,
+        r.uploaded_at as receiptUploadedAt
+      FROM expenses e
+      LEFT JOIN receipt_files r ON r.id = e.receipt_file_id
+      WHERE e.id = ?
+      LIMIT 1
+    `,
+    [expenseId],
+  );
+  return row ?? null;
+}
+
+export async function updateExpense(expenseId: string, input: ExpenseUpdateInput): Promise<LocalSyncStatus> {
+  const db = await getDb();
+  const now = new Date().toISOString();
+  const existing = await getExpenseDetail(expenseId);
+  if (!existing) {
+    throw new Error("Expense not found.");
+  }
+
+  await db.runAsync(
+    `
+      UPDATE expenses
+      SET
+        category = ?,
+        payment_method = ?,
+        amount = ?,
+        occurred_on = ?,
+        notes = ?,
+        fuel_litres = ?,
+        fuel_price_per_litre = ?,
+        fuel_total = ?,
+        local_sync_status = ?,
+        sync_state = ?,
+        cloud_synced_at = ?,
+        updated_at = ?
+      WHERE id = ?
+    `,
+    [
+      input.category,
+      input.paymentMethod,
+      input.amountGbp,
+      input.expenseDate,
+      input.note ?? null,
+      input.category === "fuel" ? (input.fuelLitres ?? null) : null,
+      input.category === "fuel" ? (input.confirmedFuelPricePerLitre ?? input.fuelPricePerLitre ?? null) : null,
+      input.category === "fuel" ? (input.fuelTotal ?? input.amountGbp) : null,
+      "saved-local",
+      "queued",
+      null,
+      now,
+      expenseId,
+    ],
+  );
+
+  await upsertSyncJob({
+    entityType: "expense",
+    entityId: expenseId,
+    syncStatus: "pending",
+    lastError: null,
+    nowIso: now,
+  });
+
+  const confirmedFuelPrice = input.confirmedFuelPricePerLitre ?? input.fuelPricePerLitre ?? null;
+  if (input.category === "fuel" && typeof confirmedFuelPrice === "number" && confirmedFuelPrice > 0) {
+    const current = await getVehicleCostSettings();
+    await saveVehicleCostSettings({
+      ...current,
+      fuelPricePerLitre: confirmedFuelPrice,
+    });
+  }
+
+  void syncExpenseToCloud(expenseId);
+  return "saved-local";
+}
+
+export async function attachReceiptToExpense(
+  expenseId: string,
+  input: AttachReceiptInput,
+): Promise<LocalSyncStatus> {
+  const db = await getDb();
+  const now = new Date().toISOString();
+  const existing = await getExpenseDetail(expenseId);
+  if (!existing) {
+    throw new Error("Expense not found.");
+  }
+
+  let receiptFileId = existing.receiptFileId;
+  if (!receiptFileId) {
+    receiptFileId = `receipt_${Date.now()}_${Math.floor(Math.random() * 100000)}`;
+    await db.runAsync(
+      `
+        INSERT INTO receipt_files (
+          id, expense_id, local_uri, mime_type, original_file_name, file_size_bytes,
+          storage_provider, cloud_object_key, cloud_bucket, cloud_region, upload_status, uploaded_at,
+          created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `,
+      [
+        receiptFileId,
+        expenseId,
+        input.localReceiptUri,
+        input.mimeType ?? null,
+        input.originalFileName ?? null,
+        input.fileSizeBytes ?? null,
+        "s3",
+        null,
+        null,
+        null,
+        "queued",
+        null,
+        now,
+        now,
+      ],
+    );
+  } else {
+    await db.runAsync(
+      `
+        UPDATE receipt_files
+        SET
+          local_uri = ?,
+          mime_type = ?,
+          original_file_name = ?,
+          file_size_bytes = ?,
+          cloud_object_key = NULL,
+          upload_status = ?,
+          uploaded_at = NULL,
+          updated_at = ?
+        WHERE id = ?
+      `,
+      [
+        input.localReceiptUri,
+        input.mimeType ?? null,
+        input.originalFileName ?? null,
+        input.fileSizeBytes ?? null,
+        "queued",
+        now,
+        receiptFileId,
+      ],
+    );
+  }
+
+  await db.runAsync(
+    `
+      UPDATE expenses
+      SET
+        receipt_required_status = ?,
+        receipt_source_type = ?,
+        local_receipt_uri = ?,
+        mime_type = ?,
+        original_file_name = ?,
+        file_size_bytes = ?,
+        receipt_file_id = ?,
+        local_sync_status = ?,
+        sync_state = ?,
+        cloud_synced_at = ?,
+        updated_at = ?
+      WHERE id = ?
+    `,
+    [
+      "attached",
+      input.receiptSourceType ?? "file-upload",
+      input.localReceiptUri,
+      input.mimeType ?? null,
+      input.originalFileName ?? null,
+      input.fileSizeBytes ?? null,
+      receiptFileId,
+      "saved-local",
+      "queued",
+      null,
+      now,
+      expenseId,
+    ],
+  );
+
+  await upsertSyncJob({
+    entityType: "expense",
+    entityId: expenseId,
+    syncStatus: "pending",
+    lastError: null,
+    nowIso: now,
+  });
+
+  void syncExpenseToCloud(expenseId);
+  return "saved-local";
+}
+
+export async function deleteExpense(expenseId: string): Promise<{ deleted: boolean; cloudDeletePending: boolean }> {
+  const db = await getDb();
+  const now = new Date().toISOString();
+  const existing = await getExpenseDetail(expenseId);
+  if (!existing) {
+    return { deleted: false, cloudDeletePending: false };
+  }
+
+  const cloudDeletePending = Boolean(existing.cloudSyncedAt);
+  if (cloudDeletePending) {
+    await upsertSyncJob({
+      entityType: "expense_delete",
+      entityId: expenseId,
+      syncStatus: "pending",
+      lastError: "Cloud delete pending implementation.",
+      nowIso: now,
+    });
+  }
+
+  await db.runAsync(`DELETE FROM receipt_files WHERE expense_id = ? OR id = ?`, [expenseId, existing.receiptFileId]);
+  await db.runAsync(`DELETE FROM sync_jobs WHERE entity_id = ?`, [expenseId]);
+  await db.runAsync(`DELETE FROM expenses WHERE id = ?`, [expenseId]);
+  return { deleted: true, cloudDeletePending };
 }
 
 async function syncExpenseToCloud(expenseId: string): Promise<LocalSyncStatus> {
@@ -383,7 +631,7 @@ async function failSync(expenseId: string, message: string): Promise<LocalSyncSt
 }
 
 async function upsertSyncJob(args: {
-  entityType: "expense" | "receipt_file" | "privacy_import_file";
+  entityType: "expense" | "receipt_file" | "privacy_import_file" | "expense_delete";
   entityId: string;
   syncStatus: "pending" | "syncing" | "synced" | "failed";
   lastError: string | null;
@@ -423,4 +671,3 @@ async function upsertSyncJob(args: {
     [id, args.entityType, args.entityId, args.syncStatus, args.lastError, nextRetryCount, args.nowIso, args.nowIso],
   );
 }
-

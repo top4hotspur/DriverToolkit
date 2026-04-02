@@ -71,6 +71,36 @@ export interface ExpenseRecord {
   localReceiptUri: string | null;
 }
 
+export interface ExpenseDetailRecord extends ExpenseRecord {
+  receiptSourceType: ReceiptSourceType | null;
+  mimeType: string | null;
+  originalFileName: string | null;
+  fileSizeBytes: number | null;
+  receiptUploadStatus: UploadStatus | null;
+  receiptCloudObjectKey: string | null;
+  receiptUploadedAt: string | null;
+}
+
+export interface ExpenseUpdateInput {
+  category: ExpenseCategory;
+  paymentMethod: ExpensePaymentMethod;
+  amountGbp: number;
+  expenseDate: string;
+  note?: string | null;
+  fuelLitres?: number | null;
+  fuelPricePerLitre?: number | null;
+  fuelTotal?: number | null;
+  confirmedFuelPricePerLitre?: number | null;
+}
+
+export interface AttachReceiptInput {
+  localReceiptUri: string;
+  mimeType?: string | null;
+  originalFileName?: string | null;
+  fileSizeBytes?: number | null;
+  receiptSourceType?: ReceiptSourceType | null;
+}
+
 export interface ReceiptFileMetadata {
   fileId: string;
   expenseId: string;

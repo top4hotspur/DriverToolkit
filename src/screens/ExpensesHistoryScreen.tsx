@@ -1,4 +1,5 @@
-﻿import { useCallback, useEffect, useState } from "react";
+import { useRouter } from "expo-router";
+import { useCallback, useEffect, useState } from "react";
 import { Text, View } from "react-native";
 import { ExpenseRecord, LocalSyncStatus, getExpenseCategoryLabel } from "../contracts/expenses";
 import { initDatabase } from "../db/schema";
@@ -7,6 +8,7 @@ import { formatGBP, formatUkDate } from "../utils/format";
 import { Card, KeyValueRow, PrimaryButton, ScreenShell } from "./ui";
 
 export function ExpensesHistoryScreen() {
+  const router = useRouter();
   const [expenses, setExpenses] = useState<ExpenseRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState<string | null>(null);
@@ -66,10 +68,12 @@ export function ExpensesHistoryScreen() {
           <KeyValueRow label="Sync" value={toSyncLabel(expense.localSyncStatus)} />
           {expense.category === "fuel" ? <Text style={styles.fuelMarker}>Fuel expense</Text> : null}
           {expense.note ? <Text>{`Note: ${expense.note}`}</Text> : null}
-          {expense.localSyncStatus === "needs-retry" ? (
-            <PrimaryButton label="Retry sync" onPress={() => void onRetrySync(expense.id)} />
-          ) : null}
-          <Text style={styles.placeholderText}>Edit/delete coming soon.</Text>
+          <View style={styles.row}>
+            {expense.localSyncStatus === "needs-retry" ? (
+              <PrimaryButton label="Retry sync" onPress={() => void onRetrySync(expense.id)} />
+            ) : null}
+            <PrimaryButton label="Open details" onPress={() => router.push(`/expenses/${expense.id}` as never)} />
+          </View>
         </Card>
       ))}
     </ScreenShell>
@@ -120,12 +124,9 @@ const styles = {
     fontWeight: "700" as const,
     marginTop: 4,
   },
-  placeholderText: {
-    marginTop: 6,
-    color: "#5d6a63",
-  },
   errorText: {
     marginTop: 8,
     color: "#7a382f",
   },
 };
+
