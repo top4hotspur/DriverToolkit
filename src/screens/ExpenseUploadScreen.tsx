@@ -1,27 +1,41 @@
-import * as DocumentPicker from "expo-document-picker";
-import { useEffect, useState } from "react";
+﻿import * as DocumentPicker from "expo-document-picker";
+import { useEffect, useMemo, useState } from "react";
 import { Text, TextInput, View } from "react-native";
-import { ExpenseType } from "../contracts/expenses";
+import { ExpenseInput, ExpensePaymentMethod, ExpenseType, LocalSyncStatus, ReceiptRequiredStatus } from "../contracts/expenses";
 import { initDatabase } from "../db/schema";
-import { saveExpense } from "../state/expenseState";
-import { formatGBP } from "../utils/format";
+import { getExpenseSyncStatus, retryExpenseSync, saveExpense } from "../state/expenseState";
+import { formatGBP, formatUkDate } from "../utils/format";
 import { Card, PrimaryButton, ScreenShell } from "./ui";
+
+const EXPENSE_TYPES: ExpenseType[] = ["fuel", "parking", "cleaning", "food", "toll", "other"];
+const PAYMENT_METHODS: ExpensePaymentMethod[] = ["card", "cash", "other"];
 
 export function ExpenseUploadScreen() {
   const [type, setType] = useState<ExpenseType>("fuel");
+  const [paymentMethod, setPaymentMethod] = useState<ExpensePaymentMethod>("card");
   const [amountInput, setAmountInput] = useState("");
   const [dateInput, setDateInput] = useState(new Date().toISOString().slice(0, 10));
   const [noteInput, setNoteInput] = useState("");
-  const [fuelPriceInput, setFuelPriceInput] = useState("");
-  const [receiptMode, setReceiptMode] = useState<"receipt-upload" | "upload-receipt-later" | "no-receipt">("receipt-upload");
   const [selectedFile, setSelectedFile] = useState<DocumentPicker.DocumentPickerAsset | null>(null);
-  const [message, setMessage] = useState<string | null>(null);
+  const [receiptRequiredStatus, setReceiptRequiredStatus] = useState<ReceiptRequiredStatus>("attached");
+  const [fuelLitresInput, setFuelLitresInput] = useState("");
+  const [fuelPriceInput, setFuelPriceInput] = useState("");
+  const [derivedFuelMessage, setDerivedFuelMessage] = useState<string | null>(null);
+  const [confirmedFuelPricePerLitre, setConfirmedFuelPricePerLitre] = useState<number | null>(null);
+  const [statusLabel, setStatusLabel] = useState<string | null>(null);
+  const [statusTone, setStatusTone] = useState<LocalSyncStatus | "info">("info");
+  const [lastExpenseId, setLastExpenseId] = useState<string | null>(null);
 
   useEffect(() => {
     initDatabase().catch(() => {
-      setMessage("Couldn't initialize local storage.");
+      setStatusLabel("Couldn't initialize local storage.");
+      setStatusTone("needs-retry");
     });
   }, []);
+
+  const amount = useMemo(() => Number(amountInput), [amountInput]);
+  const fuelLitres = useMemo(() => Number(fuelLitresInput), [fuelLitresInput]);
+  const fuelPrice = useMemo(() => Number(fuelPriceInput), [fuelPriceInput]);
 
   const pickReceipt = async () => {
     try {
@@ -31,91 +45,309 @@ export function ExpenseUploadScreen() {
       });
       if (!result.canceled && result.assets.length > 0) {
         setSelectedFile(result.assets[0]);
-        setReceiptMode("receipt-upload");
+        setReceiptRequiredStatus("attached");
+        setStatusLabel(null);
       }
     } catch {
-      setMessage("Couldn't open file picker.");
+      setStatusLabel("Couldn't open file picker.");
+      setStatusTone("needs-retry");
     }
   };
 
-  const onSave = async () => {
-    const amount = Number(amountInput);
-    if (!Number.isFinite(amount) || amount <= 0) {
-      setMessage("Enter a valid amount.");
+  const deriveFuelValues = () => {
+    if (type !== "fuel") {
       return;
     }
 
-    const fuelPrice = Number(fuelPriceInput);
-    const confirmedFuelPricePerLitre =
-      type === "fuel" && Number.isFinite(fuelPrice) && fuelPrice > 0 ? fuelPrice : null;
+    const total = Number.isFinite(amount) && amount > 0 ? amount : null;
+    const litres = Number.isFinite(fuelLitres) && fuelLitres > 0 ? fuelLitres : null;
+    const price = Number.isFinite(fuelPrice) && fuelPrice > 0 ? fuelPrice : null;
+
+    const provided = [total, litres, price].filter((value) => value !== null).length;
+    if (provided < 2) {
+      setDerivedFuelMessage("Enter at least two fuel values to derive the third.");
+      setConfirmedFuelPricePerLitre(null);
+      return;
+    }
+
+    if (!price && total && litres) {
+      const derived = total / litres;
+      setFuelPriceInput(derived.toFixed(3));
+      setDerivedFuelMessage(`Derived fuel price: ${formatGBP(derived)}/L. Confirm before saving.`);
+      setConfirmedFuelPricePerLitre(null);
+      return;
+    }
+
+    if (!litres && total && price) {
+      const derived = total / price;
+      setFuelLitresInput(derived.toFixed(3));
+      setDerivedFuelMessage(`Derived litres: ${derived.toFixed(3)}L. Confirm before saving.`);
+      setConfirmedFuelPricePerLitre(null);
+      return;
+    }
+
+    if (!total && litres && price) {
+      const derived = litres * price;
+      setAmountInput(derived.toFixed(2));
+      setDerivedFuelMessage(`Derived total paid: ${formatGBP(derived)}. Confirm before saving.`);
+      setConfirmedFuelPricePerLitre(null);
+      return;
+    }
+
+    setDerivedFuelMessage("Fuel values are complete. Confirm fuel price before saving.");
+    setConfirmedFuelPricePerLitre(null);
+  };
+
+  const confirmFuelValues = () => {
+    const parsedPrice = Number(fuelPriceInput);
+    if (!Number.isFinite(parsedPrice) || parsedPrice <= 0) {
+      setStatusLabel("Enter a valid fuel price per litre before confirming.");
+      setStatusTone("needs-retry");
+      return;
+    }
+    setConfirmedFuelPricePerLitre(parsedPrice);
+    setStatusLabel(`Fuel price confirmed at ${formatGBP(parsedPrice)}/L.`);
+    setStatusTone("info");
+  };
+
+  const onSave = async () => {
+    const parsedAmount = Number(amountInput);
+    if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
+      setStatusLabel("Enter a valid total amount.");
+      setStatusTone("needs-retry");
+      return;
+    }
+
+    if (!dateInput.trim()) {
+      setStatusLabel("Enter an expense date.");
+      setStatusTone("needs-retry");
+      return;
+    }
+
+    if (receiptRequiredStatus === "attached" && !selectedFile) {
+      setStatusLabel("Attach a receipt file or choose Add later / No receipt.");
+      setStatusTone("needs-retry");
+      return;
+    }
+
+    if (type === "fuel") {
+      if (!confirmedFuelPricePerLitre) {
+        setStatusLabel("Confirm fuel values before saving this fuel expense.");
+        setStatusTone("needs-retry");
+        return;
+      }
+
+      const parsedLitres = Number(fuelLitresInput);
+      if (!Number.isFinite(parsedLitres) || parsedLitres <= 0) {
+        setStatusLabel("Enter litres for fuel expense.");
+        setStatusTone("needs-retry");
+        return;
+      }
+    }
+
+    setStatusLabel("Syncing...");
+    setStatusTone("syncing");
+
+    const payload: ExpenseInput = {
+      type,
+      paymentMethod,
+      amountGbp: parsedAmount,
+      expenseDate: dateInput,
+      note: noteInput.trim() || null,
+      receiptRequiredStatus,
+      receiptSourceType: receiptRequiredStatus === "attached" ? "file-upload" : null,
+      localReceiptUri: receiptRequiredStatus === "attached" ? selectedFile?.uri ?? null : null,
+      mimeType: selectedFile?.mimeType ?? null,
+      originalFileName: selectedFile?.name ?? null,
+      fileSizeBytes: selectedFile?.size ?? null,
+      fuelLitres: type === "fuel" ? Number(fuelLitresInput) : null,
+      fuelPricePerLitre: type === "fuel" ? Number(fuelPriceInput) : null,
+      fuelTotal: type === "fuel" ? parsedAmount : null,
+      confirmedFuelPricePerLitre: type === "fuel" ? confirmedFuelPricePerLitre : null,
+    };
 
     try {
-      const saveResult = await saveExpense({
-        type,
-        amount,
-        occurredOn: dateInput,
-        note: noteInput,
-        receiptInputMode: receiptMode,
-        localReceiptUri: receiptMode === "receipt-upload" ? selectedFile?.uri ?? null : null,
-        mimeType: selectedFile?.mimeType ?? null,
-        originalFileName: selectedFile?.name ?? null,
-        fileSizeBytes: selectedFile?.size ?? null,
-        confirmedFuelPricePerLitre,
-      });
+      const result = await saveExpense(payload);
+      setLastExpenseId(result.expenseId);
+      setStatusTone(result.localSyncStatus);
+      setStatusLabel(buildSaveMessage(result.localSyncStatus, result.fuelPriceUpdated));
 
-      setMessage(
-        saveResult.fuelPriceUpdated
-          ? `Expense saved and fuel price updated (${formatGBP(confirmedFuelPricePerLitre ?? 0)}/L).`
-          : "Expense saved locally.",
-      );
       setAmountInput("");
       setNoteInput("");
+      setFuelLitresInput("");
       setFuelPriceInput("");
+      setDerivedFuelMessage(null);
+      setConfirmedFuelPricePerLitre(null);
       setSelectedFile(null);
+      setReceiptRequiredStatus("attached");
     } catch {
-      setMessage("Couldn't save expense. Try again.");
+      setStatusTone("needs-retry");
+      setStatusLabel("Save failed. Try again.");
     }
   };
 
+  const onRetrySync = async () => {
+    if (!lastExpenseId) {
+      return;
+    }
+    setStatusTone("syncing");
+    setStatusLabel("Syncing...");
+    try {
+      const syncStatus = await retryExpenseSync(lastExpenseId);
+      setStatusTone(syncStatus);
+      setStatusLabel(buildSaveMessage(syncStatus, false));
+    } catch {
+      setStatusTone("needs-retry");
+      setStatusLabel("Retry failed. Expense is still saved locally.");
+    }
+  };
+
+  useEffect(() => {
+    if (!lastExpenseId) {
+      return;
+    }
+
+    let active = true;
+    const tick = async () => {
+      const state = await getExpenseSyncStatus(lastExpenseId);
+      if (!active || !state) {
+        return;
+      }
+      setStatusTone(state);
+      setStatusLabel(buildSaveMessage(state, false));
+    };
+
+    tick().catch(() => {
+      // Silent fallback; manual retry remains available.
+    });
+    const interval = setInterval(() => {
+      tick().catch(() => {
+        // Silent fallback; manual retry remains available.
+      });
+    }, 1500);
+
+    return () => {
+      active = false;
+      clearInterval(interval);
+    };
+  }, [lastExpenseId]);
+
   return (
-    <ScreenShell title="Upload Expense" subtitle="Save expense details immediately and attach receipt files locally.">
+    <ScreenShell title="Upload Expense" subtitle="Save now locally, then sync receipt + metadata to cloud when available.">
       <Card title="Expense Type">
         <View style={styles.row}>
-          <PrimaryButton label={type === "fuel" ? "Fuel (Selected)" : "Fuel"} onPress={() => setType("fuel")} />
-          <PrimaryButton label={type === "other" ? "Other (Selected)" : "Other"} onPress={() => setType("other")} />
+          {EXPENSE_TYPES.map((entry) => (
+            <PrimaryButton
+              key={entry}
+              label={type === entry ? `${toTitle(entry)} (Selected)` : toTitle(entry)}
+              onPress={() => setType(entry)}
+            />
+          ))}
+        </View>
+      </Card>
+
+      <Card title="Payment Method">
+        <View style={styles.row}>
+          {PAYMENT_METHODS.map((entry) => (
+            <PrimaryButton
+              key={entry}
+              label={paymentMethod === entry ? `${toTitle(entry)} (Selected)` : toTitle(entry)}
+              onPress={() => setPaymentMethod(entry)}
+            />
+          ))}
         </View>
       </Card>
 
       <Card title="Details">
-        <Text>Amount (£)</Text>
+        <Text>Total amount paid (GBP)</Text>
         <TextInput value={amountInput} onChangeText={setAmountInput} keyboardType="decimal-pad" style={styles.input} />
         <Text>Date (YYYY-MM-DD)</Text>
         <TextInput value={dateInput} onChangeText={setDateInput} style={styles.input} />
+        <Text>{`Display: ${formatUkDate(dateInput)}`}</Text>
         <Text>Optional note</Text>
         <TextInput value={noteInput} onChangeText={setNoteInput} style={styles.input} />
-        {type === "fuel" ? (
-          <>
-            <Text>Fuel price per litre (manual confirm)</Text>
-            <TextInput value={fuelPriceInput} onChangeText={setFuelPriceInput} keyboardType="decimal-pad" style={styles.input} />
-          </>
-        ) : null}
       </Card>
 
-      <Card title="Receipt">
+      {type === "fuel" ? (
+        <Card title="Fuel Details">
+          <Text>Litres</Text>
+          <TextInput value={fuelLitresInput} onChangeText={setFuelLitresInput} keyboardType="decimal-pad" style={styles.input} />
+          <Text>Price per litre (GBP)</Text>
+          <TextInput value={fuelPriceInput} onChangeText={setFuelPriceInput} keyboardType="decimal-pad" style={styles.input} />
+          <View style={styles.row}>
+            <PrimaryButton label="Derive missing field" onPress={deriveFuelValues} />
+            <PrimaryButton label="Confirm fuel values" onPress={confirmFuelValues} />
+          </View>
+          {derivedFuelMessage ? <Text>{derivedFuelMessage}</Text> : null}
+          {confirmedFuelPricePerLitre ? <Text>{`Confirmed fuel £/L: ${formatGBP(confirmedFuelPricePerLitre)}`}</Text> : null}
+        </Card>
+      ) : null}
+
+      <Card title="Receipt Attachment">
         <PrimaryButton label="Attach receipt file" onPress={pickReceipt} />
-        {selectedFile ? <Text>{`Attached: ${selectedFile.name}`}</Text> : null}
+        {selectedFile ? <Text>{`Attached: ${selectedFile.name}`}</Text> : <Text>No receipt file selected.</Text>}
         <View style={styles.row}>
-          <PrimaryButton label={receiptMode === "upload-receipt-later" ? "Add later (Selected)" : "Add later"} onPress={() => setReceiptMode("upload-receipt-later")} />
-          <PrimaryButton label={receiptMode === "no-receipt" ? "No receipt (Selected)" : "No receipt"} onPress={() => setReceiptMode("no-receipt")} />
+          <PrimaryButton
+            label={receiptRequiredStatus === "attached" ? "Receipt attached (Selected)" : "Receipt attached"}
+            onPress={() => setReceiptRequiredStatus("attached")}
+          />
+          <PrimaryButton
+            label={receiptRequiredStatus === "add_later" ? "Add receipt later (Selected)" : "Add receipt later"}
+            onPress={() => setReceiptRequiredStatus("add_later")}
+          />
+          <PrimaryButton
+            label={receiptRequiredStatus === "none" ? "No receipt (Selected)" : "No receipt"}
+            onPress={() => setReceiptRequiredStatus("none")}
+          />
         </View>
       </Card>
 
       <Card title="Save">
         <PrimaryButton label="Save expense" onPress={onSave} />
-        {message ? <Text>{message}</Text> : null}
+        {statusTone === "needs-retry" && lastExpenseId ? (
+          <PrimaryButton label="Retry cloud sync" onPress={onRetrySync} />
+        ) : null}
+        {statusLabel ? <Text style={toneStyle(statusTone)}>{statusLabel}</Text> : null}
       </Card>
     </ScreenShell>
   );
+}
+
+function buildSaveMessage(sync: LocalSyncStatus, fuelPriceUpdated: boolean): string {
+  if (sync === "synced") {
+    return fuelPriceUpdated
+      ? "Synced to cloud. Fuel £/L updated in Settings."
+      : "Synced to cloud.";
+  }
+
+  if (sync === "syncing") {
+    return "Syncing...";
+  }
+
+  if (sync === "needs-retry") {
+    return fuelPriceUpdated
+      ? "Saved locally. Needs retry for cloud sync. Fuel £/L updated."
+      : "Saved locally. Needs retry for cloud sync.";
+  }
+
+  return fuelPriceUpdated ? "Saved locally. Fuel £/L updated in Settings." : "Saved locally.";
+}
+
+function toTitle(value: string): string {
+  return value.charAt(0).toUpperCase() + value.slice(1);
+}
+
+function toneStyle(tone: LocalSyncStatus | "info") {
+  if (tone === "synced") {
+    return { color: "#23593f", marginTop: 8 };
+  }
+  if (tone === "needs-retry") {
+    return { color: "#7a382f", marginTop: 8 };
+  }
+  if (tone === "syncing") {
+    return { color: "#415049", marginTop: 8 };
+  }
+  return { color: "#415049", marginTop: 8 };
 }
 
 const styles = {
@@ -133,3 +365,4 @@ const styles = {
     gap: 8,
   },
 };
+

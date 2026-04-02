@@ -1,20 +1,32 @@
-import { ExpenseFormInput, ExpenseSaveResult, SavedExpense } from "../contracts/expenses";
+﻿import { ExpenseInput, ExpenseRecord, ExpenseSaveResult, LocalSyncStatus } from "../contracts/expenses";
 import { getVehicleCostSettings, saveVehicleCostSettings } from "./vehicleCostState";
 
-const stored: SavedExpense[] = [];
+const stored: ExpenseRecord[] = [];
 
-export async function saveExpense(input: ExpenseFormInput): Promise<ExpenseSaveResult> {
+export async function saveExpense(input: ExpenseInput): Promise<ExpenseSaveResult> {
   const now = new Date().toISOString();
   const expenseId = `expense_${Date.now()}`;
+
+  const localSyncStatus: LocalSyncStatus = "needs-retry";
+
   stored.unshift({
     id: expenseId,
+    userId: "local-user",
     type: input.type,
-    amount: input.amount,
-    occurredOn: input.occurredOn,
+    paymentMethod: input.paymentMethod,
+    amountGbp: input.amountGbp,
+    expenseDate: input.expenseDate,
     note: input.note ?? null,
-    receiptInputMode: input.receiptInputMode,
-    localReceiptUri: input.localReceiptUri ?? null,
+    receiptRequiredStatus: input.receiptRequiredStatus,
+    receiptFileId: null,
+    fuelLitres: input.fuelLitres ?? null,
+    fuelPricePerLitre: input.confirmedFuelPricePerLitre ?? input.fuelPricePerLitre ?? null,
+    fuelTotal: input.fuelTotal ?? input.amountGbp,
     createdAt: now,
+    updatedAt: now,
+    localSyncStatus,
+    cloudSyncedAt: null,
+    localReceiptUri: input.localReceiptUri ?? null,
   });
 
   let fuelPriceUpdated = false;
@@ -30,10 +42,22 @@ export async function saveExpense(input: ExpenseFormInput): Promise<ExpenseSaveR
   return {
     ok: true,
     expenseId,
+    localSyncStatus: "saved-local",
     fuelPriceUpdated,
+    warning: "Saved locally first. Cloud sync is not configured for web fallback.",
   };
 }
 
-export async function listRecentExpenses(limit = 20): Promise<SavedExpense[]> {
+export async function retryExpenseSync(_: string): Promise<LocalSyncStatus> {
+  return "needs-retry";
+}
+
+export async function getExpenseSyncStatus(expenseId: string): Promise<LocalSyncStatus | null> {
+  const match = stored.find((entry) => entry.id === expenseId);
+  return match?.localSyncStatus ?? null;
+}
+
+export async function listRecentExpenses(limit = 20): Promise<ExpenseRecord[]> {
   return stored.slice(0, limit);
 }
+

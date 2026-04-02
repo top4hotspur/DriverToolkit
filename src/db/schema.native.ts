@@ -58,13 +58,21 @@ async function runSchemaMigrations(): Promise<void> {
   ]);
 
   await addMissingColumns("expenses", [
+    { name: "payment_method", sqlType: "TEXT DEFAULT 'other'" },
+    { name: "receipt_required_status", sqlType: "TEXT DEFAULT 'none'" },
     { name: "receipt_source_type", sqlType: "TEXT" },
     { name: "local_receipt_uri", sqlType: "TEXT" },
     { name: "mime_type", sqlType: "TEXT" },
     { name: "original_file_name", sqlType: "TEXT" },
     { name: "file_size_bytes", sqlType: "INTEGER" },
+    { name: "fuel_litres", sqlType: "REAL" },
+    { name: "fuel_price_per_litre", sqlType: "REAL" },
+    { name: "fuel_total", sqlType: "REAL" },
+    { name: "local_sync_status", sqlType: "TEXT DEFAULT 'saved-local'" },
+    { name: "cloud_synced_at", sqlType: "TEXT" },
     { name: "sync_state", sqlType: "TEXT DEFAULT 'local-only'" },
     { name: "receipt_file_id", sqlType: "TEXT" },
+    { name: "updated_at", sqlType: "TEXT" },
   ]);
 
   await addMissingColumns("app_settings", [
@@ -97,10 +105,30 @@ async function runSchemaMigrations(): Promise<void> {
       mime_type TEXT,
       original_file_name TEXT,
       file_size_bytes INTEGER,
+      storage_provider TEXT NOT NULL DEFAULT 'local-only',
       cloud_object_key TEXT,
       cloud_bucket TEXT,
       cloud_region TEXT,
       upload_status TEXT NOT NULL DEFAULT 'local-only',
+      uploaded_at TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )
+  `);
+
+  await addMissingColumns("receipt_files", [
+    { name: "storage_provider", sqlType: "TEXT DEFAULT 'local-only'" },
+    { name: "uploaded_at", sqlType: "TEXT" },
+  ]);
+
+  await db.execAsync(`
+    CREATE TABLE IF NOT EXISTS sync_jobs (
+      id TEXT PRIMARY KEY NOT NULL,
+      entity_type TEXT NOT NULL,
+      entity_id TEXT NOT NULL,
+      sync_status TEXT NOT NULL,
+      last_error TEXT,
+      retry_count INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     )
