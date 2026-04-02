@@ -201,9 +201,12 @@ export interface ImportStatusResponse {
   userId: string;
   provider: "uber";
   sourceFileName: string;
+  selectedFileName?: string;
   objectKey: string;
   stage: BackendImportStage;
+  status?: BackendImportStage;
   startedAt: string;
+  updatedAt?: string;
   finishedAt: string | null;
   progressPercent: number;
   stageTimings: ImportStageTiming[];

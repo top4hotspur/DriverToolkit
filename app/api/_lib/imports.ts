@@ -69,7 +69,7 @@ export async function createUberImportSession(args: {
     stage: "created",
     startedAt: now,
     finishedAt: null,
-    progressPercent: 0,
+    progressPercent: 5,
     stageTimings,
     summary: null,
     diagnostics: null,
@@ -117,7 +117,7 @@ export async function markImportUploading(args: { userId: string; importId: stri
   await updateImportStage({
     ...args,
     stage: "uploading",
-    progressPercent: 5,
+    progressPercent: 20,
   });
 }
 
@@ -125,7 +125,7 @@ export async function markImportUploaded(args: { userId: string; importId: strin
   await updateImportStage({
     ...args,
     stage: "uploaded",
-    progressPercent: 15,
+    progressPercent: 40,
   });
 }
 
@@ -136,7 +136,7 @@ export async function processUberImport(args: { userId: string; importId: string
   }
 
   try {
-    await updateImportStage({ ...args, stage: "parsing", progressPercent: 30 });
+    await updateImportStage({ ...args, stage: "parsing", progressPercent: 50 });
     const zipBuffer = await downloadZip(record.bucket, record.objectKey);
     const descriptor: ImportFileDescriptor = {
       fileName: record.sourceFileName,
@@ -146,11 +146,11 @@ export async function processUberImport(args: { userId: string; importId: string
       contentsBase64: zipBuffer.toString("base64"),
     };
 
-    await updateImportStage({ ...args, stage: "validating", progressPercent: 45 });
+    await updateImportStage({ ...args, stage: "validating", progressPercent: 60 });
     const artifacts = await buildUberTripPaymentArtifactsFromZip(descriptor);
 
-    await updateImportStage({ ...args, stage: "matching", progressPercent: 70 });
-    await updateImportStage({ ...args, stage: "enriching", progressPercent: 85 });
+    await updateImportStage({ ...args, stage: "matching", progressPercent: 80 });
+    await updateImportStage({ ...args, stage: "enriching", progressPercent: 90 });
 
     const summary = buildSummaryFromArtifacts(artifacts);
     const diagnostics: BackendImportDiagnostics = {
@@ -352,20 +352,113 @@ function buildSummaryFromArtifacts(
 }
 
 function toStatusResponse(record: ImportRecord): ImportStatusResponse {
+  const summary = normalizeSummary(record.summary);
+  const stage = (record.stage ?? "created") as BackendImportStage;
+  const startedAt = normalizeIso(record.startedAt) ?? normalizeIso(record.createdAt) ?? new Date().toISOString();
+  const finishedAt = normalizeIso(record.finishedAt);
+  const updatedAt = normalizeIso(record.updatedAt) ?? startedAt;
   return {
     importId: record.importId,
     userId: record.userId,
     provider: record.provider,
-    sourceFileName: record.sourceFileName,
+    sourceFileName: record.sourceFileName ?? "Uber privacy export ZIP",
+    selectedFileName: record.sourceFileName ?? "Uber privacy export ZIP",
     objectKey: record.objectKey,
-    stage: record.stage,
-    startedAt: record.startedAt,
-    finishedAt: record.finishedAt,
-    progressPercent: record.progressPercent,
-    stageTimings: record.stageTimings,
-    summary: record.summary,
-    diagnostics: record.diagnostics,
-    warnings: record.warnings,
-    errors: record.errors,
+    stage,
+    status: stage,
+    startedAt,
+    updatedAt,
+    finishedAt,
+    progressPercent: normalizeProgress(stage, record.progressPercent),
+    stageTimings: Array.isArray(record.stageTimings) ? record.stageTimings : [],
+    summary,
+    diagnostics: record.diagnostics ?? {
+      rowsParsed: { trips: 0, payments: 0, analytics: 0 },
+      matchesCreated: summary.matchedTrips,
+      analyticsCoverage: summary.analyticsCoverageRange ? "partial" : "none",
+      failureReason: null,
+    },
+    warnings: Array.isArray(record.warnings) ? record.warnings : [],
+    errors: Array.isArray(record.errors) ? record.errors : [],
   };
+}
+
+function normalizeSummary(summary: BackendImportSummary | null): BackendImportSummary {
+  return {
+    tripsFileFound: summary?.tripsFileFound ?? true,
+    paymentsFileFound: summary?.paymentsFileFound ?? true,
+    analyticsFileFound: summary?.analyticsFileFound ?? true,
+    ignoredFilesCount: numberOrZero(summary?.ignoredFilesCount),
+    tripsDateRange: {
+      startAt: normalizeIso(summary?.tripsDateRange?.startAt) ?? null,
+      endAt: normalizeIso(summary?.tripsDateRange?.endAt) ?? null,
+    },
+    paymentsDateRange: {
+      startAt: normalizeIso(summary?.paymentsDateRange?.startAt) ?? null,
+      endAt: normalizeIso(summary?.paymentsDateRange?.endAt) ?? null,
+    },
+    analyticsDateRange: summary?.analyticsDateRange
+      ? {
+          startAt: normalizeIso(summary.analyticsDateRange.startAt) ?? null,
+          endAt: normalizeIso(summary.analyticsDateRange.endAt) ?? null,
+        }
+      : null,
+    matchedTrips: numberOrZero(summary?.matchedTrips),
+    unmatchedTrips: numberOrZero(summary?.unmatchedTrips),
+    unmatchedPayments: numberOrZero(summary?.unmatchedPayments),
+    ambiguousMatches: numberOrZero(summary?.ambiguousMatches),
+    reimbursementsDetected: Number.isFinite(summary?.reimbursementsDetected as number)
+      ? Number(summary?.reimbursementsDetected)
+      : 0,
+    analyticsCoverageRange: summary?.analyticsCoverageRange
+      ? {
+          startAt: normalizeIso(summary.analyticsCoverageRange.startAt) ?? null,
+          endAt: normalizeIso(summary.analyticsCoverageRange.endAt) ?? null,
+        }
+      : null,
+    locationEnrichedTrips: numberOrZero(summary?.locationEnrichedTrips),
+  };
+}
+
+function normalizeProgress(stage: BackendImportStage, progress: number): number {
+  if (Number.isFinite(progress) && progress >= 0 && progress <= 100) {
+    return progress;
+  }
+  if (stage === "created") {
+    return 5;
+  }
+  if (stage === "uploading") {
+    return 20;
+  }
+  if (stage === "uploaded") {
+    return 40;
+  }
+  if (stage === "parsing") {
+    return 50;
+  }
+  if (stage === "validating") {
+    return 60;
+  }
+  if (stage === "matching") {
+    return 80;
+  }
+  if (stage === "enriching") {
+    return 90;
+  }
+  return 100;
+}
+
+function normalizeIso(input: string | null | undefined): string | null {
+  if (!input) {
+    return null;
+  }
+  const time = Date.parse(input);
+  if (Number.isNaN(time)) {
+    return null;
+  }
+  return new Date(time).toISOString();
+}
+
+function numberOrZero(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
