@@ -1,5 +1,6 @@
 import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system/legacy";
+import { useRouter } from "expo-router";
 import { useEffect, useState } from "react";
 import { Text, View } from "react-native";
 import { initDatabase } from "../db/schema";
@@ -14,6 +15,7 @@ import { queuePrivacyImportFileMetadata } from "../state/cloudFileState";
 import { Card, PrimaryButton, ScreenShell } from "./ui";
 
 export function UploadScreen() {
+  const router = useRouter();
   const [status, setStatus] = useState<UploadStatusViewModel>(createIdleUploadStatus());
   const [latestSummary, setLatestSummary] = useState<{
     sourceFileName: string;
@@ -143,6 +145,9 @@ export function UploadScreen() {
         <Text>{status.description}</Text>
         {status.selectedFileName ? <Text>{`Selected file: ${status.selectedFileName}`}</Text> : null}
         {status.result ? <ImportResultSummary result={status.result} /> : null}
+        {status.result?.ok && status.result.uberImportSummary ? (
+          <PrimaryButton label="Review latest import" onPress={() => router.push("/import/review")} />
+        ) : null}
       </Card>
 
       {newAchievements?.hasNewAchievements ? (

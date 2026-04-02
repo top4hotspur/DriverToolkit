@@ -40,6 +40,60 @@ export interface LatestImportSummary {
   dataEndAt: string | null;
 }
 
+export interface LatestUberImportReview {
+  importId: string;
+  sourceFileName: string;
+  importedAt: string;
+  parseStatus: string;
+  tripsDateRange: {
+    startAt: string | null;
+    endAt: string | null;
+  };
+  paymentsDateRange: {
+    startAt: string | null;
+    endAt: string | null;
+  };
+  analyticsDateRange: {
+    startAt: string | null;
+    endAt: string | null;
+  } | null;
+  discovery: {
+    tripsFileFound: boolean;
+    paymentsFileFound: boolean;
+    analyticsFileFound: boolean;
+    ignoredFilesCount: number;
+  };
+  matchedTrips: number;
+  unmatchedTrips: number;
+  unmatchedPaymentGroups: number;
+  ambiguousMatches: number;
+  reimbursementsDetected: number;
+  locationEnrichedTrips: number;
+  analyticsCoverageNote: string;
+  matchedExamples: Array<{
+    tripId: string;
+    tripUuid: string;
+    confidenceBand: string;
+    score: number;
+    matchedAt: string | null;
+  }>;
+  unmatchedTripExamples: Array<{
+    tripId: string;
+    dropoffTimestamp: string | null;
+    originalFareLocal: number | null;
+  }>;
+  unmatchedPaymentExamples: Array<{
+    tripUuid: string;
+    paymentTimestampAnchor: string | null;
+    fareComparable: number;
+  }>;
+  reimbursementExamples: Array<{
+    tripUuid: string;
+    reimbursementTotal: number;
+    adjustmentTotal: number;
+  }>;
+}
+
 export async function persistImport(payload: PersistImportPayload): Promise<PersistImportResult> {
   const db = await getDb();
 
@@ -214,6 +268,124 @@ export async function getLatestImportSummary(): Promise<LatestImportSummary | nu
   return row ?? null;
 }
 
+export async function getLatestUberImportReview(): Promise<LatestUberImportReview | null> {
+  const db = await getDb();
+  const row = await db.getFirstAsync<{
+    importId: string;
+    sourceFileName: string;
+    importedAt: string;
+    parseStatus: string;
+    discoveryJson: string;
+    validationJson: string;
+    matchedJson: string;
+    unmatchedJson: string;
+    ambiguousJson: string;
+    enrichmentJson: string;
+  }>(`
+    SELECT
+      p.id as importId,
+      p.source_file_name as sourceFileName,
+      p.imported_at as importedAt,
+      p.parse_status as parseStatus,
+      a.discovery_json as discoveryJson,
+      a.validation_json as validationJson,
+      a.matched_json as matchedJson,
+      a.unmatched_json as unmatchedJson,
+      a.ambiguous_json as ambiguousJson,
+      a.enrichment_json as enrichmentJson
+    FROM provider_imports p
+    INNER JOIN import_match_artifacts a ON a.import_id = p.id
+    WHERE p.provider = 'uber'
+    ORDER BY p.imported_at DESC
+    LIMIT 1
+  `);
+
+  if (!row) {
+    return null;
+  }
+
+  const discovery = safeJson<{
+    tripsFileFound: boolean;
+    paymentsFileFound: boolean;
+    analyticsFileFound: boolean;
+    ignoredFilesCount: number;
+  }>(row.discoveryJson, {
+    tripsFileFound: false,
+    paymentsFileFound: false,
+    analyticsFileFound: false,
+    ignoredFilesCount: 0,
+  });
+  const validation = safeJson<{
+    trips?: { range?: { startAt: string | null; endAt: string | null } };
+    payments?: { range?: { startAt: string | null; endAt: string | null } };
+    analytics?: { range?: { startAt: string | null; endAt: string | null } } | null;
+    warnings?: string[];
+    overlap?: { tripsAnalyticsOverlap?: boolean | null };
+  }>(row.validationJson, {});
+  const matched = safeJson<{
+    paymentGroups?: Array<{ tripUuid: string; totals?: { reimbursementTotal?: number; adjustmentTotal?: number } }>;
+    matchedTrips?: Array<{
+      tripId: string;
+      tripUuid: string;
+      matchedAt: string | null;
+      score?: { confidenceBand?: string; totalScore?: number };
+    }>;
+  }>(row.matchedJson, {});
+  const unmatched = safeJson<{
+    unmatchedTrips?: Array<{ tripId: string; dropoffTimestamp: string | null; originalFareLocal: number | null }>;
+    unmatchedPaymentGroups?: Array<{ tripUuid: string; paymentTimestampAnchor: string | null; fareComparable: number }>;
+  }>(row.unmatchedJson, {});
+  const ambiguous = safeJson<Array<unknown>>(row.ambiguousJson, []);
+  const enrichment = safeJson<Array<{ inferredStart: unknown | null; inferredEnd: unknown | null }>>(row.enrichmentJson, []);
+
+  const paymentGroups = matched.paymentGroups ?? [];
+  const reimbursements = paymentGroups
+    .map((group) => ({
+      tripUuid: group.tripUuid,
+      reimbursementTotal: round2(group.totals?.reimbursementTotal ?? 0),
+      adjustmentTotal: round2(group.totals?.adjustmentTotal ?? 0),
+    }))
+    .filter((group) => group.reimbursementTotal !== 0 || group.adjustmentTotal !== 0);
+
+  const locationEnrichedTrips = enrichment.filter(
+    (item) => item.inferredStart !== null || item.inferredEnd !== null,
+  ).length;
+
+  return {
+    importId: row.importId,
+    sourceFileName: row.sourceFileName,
+    importedAt: row.importedAt,
+    parseStatus: row.parseStatus,
+    tripsDateRange: validation.trips?.range ?? { startAt: null, endAt: null },
+    paymentsDateRange: validation.payments?.range ?? { startAt: null, endAt: null },
+    analyticsDateRange: validation.analytics?.range ?? null,
+    discovery,
+    matchedTrips: matched.matchedTrips?.length ?? 0,
+    unmatchedTrips: unmatched.unmatchedTrips?.length ?? 0,
+    unmatchedPaymentGroups: unmatched.unmatchedPaymentGroups?.length ?? 0,
+    ambiguousMatches: ambiguous.length,
+    reimbursementsDetected: round2(
+      reimbursements.reduce((sum, item) => sum + item.reimbursementTotal + item.adjustmentTotal, 0),
+    ),
+    locationEnrichedTrips,
+    analyticsCoverageNote: buildAnalyticsCoverageNote({
+      hasAnalytics: discovery.analyticsFileFound,
+      analyticsOverlap: validation.overlap?.tripsAnalyticsOverlap ?? null,
+      warnings: validation.warnings ?? [],
+    }),
+    matchedExamples: (matched.matchedTrips ?? []).slice(0, 5).map((item) => ({
+      tripId: item.tripId,
+      tripUuid: item.tripUuid,
+      confidenceBand: item.score?.confidenceBand ?? "NONE",
+      score: round2(item.score?.totalScore ?? 0),
+      matchedAt: item.matchedAt,
+    })),
+    unmatchedTripExamples: (unmatched.unmatchedTrips ?? []).slice(0, 5),
+    unmatchedPaymentExamples: (unmatched.unmatchedPaymentGroups ?? []).slice(0, 5),
+    reimbursementExamples: reimbursements.slice(0, 5),
+  };
+}
+
 async function getMetricDefaults(): Promise<{
   mpg: number;
   fuelPricePerLitre: number;
@@ -313,4 +485,33 @@ async function insertNormalizedRow(
       createdAt,
     ],
   );
+}
+
+function safeJson<T>(value: string, fallback: T): T {
+  try {
+    return JSON.parse(value) as T;
+  } catch {
+    return fallback;
+  }
+}
+
+function buildAnalyticsCoverageNote(args: {
+  hasAnalytics: boolean;
+  analyticsOverlap: boolean | null;
+  warnings: string[];
+}): string {
+  if (!args.hasAnalytics) {
+    return "No analytics file provided.";
+  }
+  if (args.analyticsOverlap === false) {
+    return "Analytics file did not overlap trip period.";
+  }
+  if (args.warnings.some((warning) => warning.toLowerCase().includes("partial"))) {
+    return "Analytics coverage is partial/recent only.";
+  }
+  return "Analytics coverage overlaps import period.";
+}
+
+function round2(value: number): number {
+  return Math.round(value * 100) / 100;
 }
