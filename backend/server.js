@@ -331,6 +331,27 @@ function getRowValueByAliases(row, aliases) {
   return null;
 }
 
+function getNumericRowValue(row, aliases) {
+  const raw = getRowValueByAliases(row, aliases);
+  const numeric = Number.parseFloat(String(raw ?? ""));
+  return Number.isNaN(numeric) ? null : numeric;
+}
+
+function getBooleanRowValue(row, aliases) {
+  const raw = getRowValueByAliases(row, aliases);
+  if (raw == null) {
+    return null;
+  }
+  const normalized = String(raw).trim().toLowerCase();
+  if (["true", "1", "yes", "y"].includes(normalized)) {
+    return true;
+  }
+  if (["false", "0", "no", "n"].includes(normalized)) {
+    return false;
+  }
+  return null;
+}
+
 function computeTimestampFallbackMatchingSummary(
   tripRows,
   paymentRows,
@@ -421,6 +442,7 @@ function computeTimestampFallbackMatchingSummary(
 }
 
 function computeFirstPassMatchingSummary(
+  importId,
   tripRows,
   paymentRows,
   tripTimestampField,
@@ -476,6 +498,11 @@ function computeFirstPassMatchingSummary(
       ...fallback,
       analyticsCoverageRange,
       geoLinkedTrips: 0,
+      geoEligibleTrips: 0,
+      notGeoEligibleTrips: safeTripRows.length,
+      groupedTripsMatchedToPayments: 0,
+      unmatchedTripsInWindow: 0,
+      unmatchedPaymentGroupsInWindow: 0,
       toleranceUsedSeconds: 60,
       geoLinkedDataset: [],
       diagnostics: {
@@ -578,22 +605,94 @@ function computeFirstPassMatchingSummary(
     if (!nearest) {
       continue;
     }
+    const paymentClassifications = Array.from(
+      new Set(
+        (item.paymentGroup.rows ?? [])
+          .map((row) => getRowValueByAliases(row, ["classification", "classifications"]))
+          .filter((value) => value != null)
+          .map((value) => String(value))
+      )
+    );
+    const paymentCategories = Array.from(
+      new Set(
+        (item.paymentGroup.rows ?? [])
+          .map((row) => getRowValueByAliases(row, ["category", "categories"]))
+          .filter((value) => value != null)
+          .map((value) => String(value))
+      )
+    );
+    const requestTimestampIso = item.trip.timestampIso;
+    const beginTimestamp = parseDateValue(
+      getRowValueByAliases(item.trip.row, ["begintrip_timestamp_local", "begintrip_timestamp"])
+    );
+    const dropoffTimestamp = parseDateValue(
+      getRowValueByAliases(item.trip.row, ["dropoff_timestamp_local", "dropoff_timestamp"])
+    );
+    const confidence = nearest.diffMs <= 15_000 ? "high" : nearest.diffMs <= 45_000 ? "medium" : "low";
     geoLinkedDataset.push({
-      tripRequestTimestamp: item.trip.timestampIso,
-      paymentGroupedTimestamp: item.paymentGroup.timestampIso,
-      paymentGroupedFinancialTotal: Math.round(item.paymentGroup.financialTotal * 100) / 100,
-      analyticsEventTimestamp: nearest.event.eventIso,
-      latitude: Number(getRowValueByAliases(nearest.event.raw, ["latitude"])) || 0,
-      longitude: Number(getRowValueByAliases(nearest.event.raw, ["longitude"])) || 0,
-      speedGps: Number(getRowValueByAliases(nearest.event.raw, ["speed_gps", "speed"])) || 0,
-      analyticsEventType: String(
-        getRowValueByAliases(nearest.event.raw, ["analytics_event_type", "event_type"]) ??
-          "unknown"
-      ),
-      matchConfidence: nearest.diffMs <= 15_000 ? "high" : "medium",
+      linkedTripId: `${importId}:${requestTimestampIso ?? "unknown"}:${item.paymentGroup.tripUuid ?? "no-uuid"}`,
+      sourceImportId: importId,
+      provider: "uber",
+      matchMode: "payment_group_timestamp",
+      matchConfidence: confidence,
       toleranceUsedSeconds: 60,
+      geoEligible: true,
+      geoEligibilityReason: "inside_analytics_window",
+      locationLinked: true,
+      trip: {
+        requestTimestamp: requestTimestampIso,
+        beginTimestamp: beginTimestamp ? beginTimestamp.toISOString() : null,
+        dropoffTimestamp: dropoffTimestamp ? dropoffTimestamp.toISOString() : null,
+        status: getRowValueByAliases(item.trip.row, ["status"]) ?? null,
+        productName: getRowValueByAliases(item.trip.row, ["product_name", "product"]) ?? null,
+        distanceMiles: getNumericRowValue(item.trip.row, ["trip_distance_miles", "distance_miles", "distance"]),
+        durationSeconds: getNumericRowValue(item.trip.row, ["trip_duration_seconds", "duration_seconds", "duration"]),
+        currencyCode: getRowValueByAliases(item.trip.row, ["currency_code", "currency"]) ?? null,
+        vehicleUuid: getRowValueByAliases(item.trip.row, ["vehicle_uuid"]) ?? null,
+        licensePlate: getRowValueByAliases(item.trip.row, ["license_plate"]) ?? null,
+      },
+      paymentGroup: {
+        tripUuid: item.paymentGroup.tripUuid ?? null,
+        groupedTimestamp: item.paymentGroup.timestampIso ?? null,
+        currencyCode:
+          getRowValueByAliases(item.paymentGroup.rows[0] ?? null, ["currency_code", "currency"]) ?? null,
+        rowCount: item.paymentGroup.rows.length,
+        financialTotal: Math.round(item.paymentGroup.financialTotal * 100) / 100,
+        rawClassifications: paymentClassifications,
+        rawCategories: paymentCategories,
+      },
+      analytics: {
+        eventTimestamp: nearest.event.eventIso,
+        eventType:
+          getRowValueByAliases(nearest.event.raw, ["analytics_event_type", "event_type"]) ?? null,
+        latitude: getNumericRowValue(nearest.event.raw, ["latitude"]),
+        longitude: getNumericRowValue(nearest.event.raw, ["longitude"]),
+        speedGps: getNumericRowValue(nearest.event.raw, ["speed_gps", "speed"]),
+        city: getRowValueByAliases(nearest.event.raw, ["city"]) ?? null,
+        driverOnline: getBooleanRowValue(nearest.event.raw, ["driver_online"]),
+      },
+      location: {
+        lat: getNumericRowValue(nearest.event.raw, ["latitude"]),
+        lng: getNumericRowValue(nearest.event.raw, ["longitude"]),
+        source: "driver_app_analytics",
+        resolvedAreaLabel: null,
+        locationConfidence: confidence,
+      },
+      flags: {
+        hasTrip: true,
+        hasPaymentGroup: true,
+        hasAnalytics: true,
+        insideAnalyticsWindow: true,
+        timestampAligned: true,
+        requiresReview: confidence === "low",
+      },
     });
   }
+
+  const geoEligibleTrips = tripsInAnalyticsWindow.length;
+  const notGeoEligibleTrips = Math.max(0, safeTripRows.length - geoEligibleTrips);
+  const unmatchedTripsInWindow = unmatchedTrips;
+  const unmatchedPaymentGroupsInWindow = unmatchedPayments;
 
   return {
     matchingMode: "uuid",
@@ -603,6 +702,11 @@ function computeFirstPassMatchingSummary(
     ambiguousMatches,
     analyticsCoverageRange,
     geoLinkedTrips: geoLinkedDataset.length,
+    geoEligibleTrips,
+    notGeoEligibleTrips,
+    groupedTripsMatchedToPayments: matchedTrips,
+    unmatchedTripsInWindow,
+    unmatchedPaymentGroupsInWindow,
     toleranceUsedSeconds: 60,
     geoLinkedDataset,
     diagnostics: {
@@ -623,6 +727,31 @@ function computeFirstPassMatchingSummary(
       groupedTripsMatchedToPayments: matchedTrips,
     },
   };
+}
+
+function persistLinkedDatasetArtifact(importId, linkedDataset, summary) {
+  const artifactPath = path.join(uploadsDir, `${importId}-geo-linked.json`);
+  console.log(`[IMPORT][confirm] linkedDatasetPersistStart importId=${importId} path=${artifactPath}`);
+  try {
+    const payload = {
+      importId,
+      provider: "uber",
+      persistedAt: nowIso(),
+      linkedRecordCount: Array.isArray(linkedDataset) ? linkedDataset.length : 0,
+      summary,
+      linkedRecords: Array.isArray(linkedDataset) ? linkedDataset : [],
+    };
+    fs.writeFileSync(artifactPath, JSON.stringify(payload, null, 2), "utf8");
+    console.log(
+      `[IMPORT][confirm] linkedDatasetPersistSuccess importId=${importId} linkedRecordCount=${payload.linkedRecordCount} geoLinkedDatasetSampleCount=${Array.isArray(summary?.geoLinkedDatasetSample) ? summary.geoLinkedDatasetSample.length : 0}`
+    );
+    return artifactPath;
+  } catch (error) {
+    console.error(
+      `[IMPORT][confirm] linkedDatasetPersistFail importId=${importId} message=${error instanceof Error ? error.message : "unknown"}`
+    );
+    return null;
+  }
 }
 
 function summarizeCsvEntry(
@@ -762,6 +891,13 @@ function buildStatusPayload(record) {
       startAt: "2026-03-01T00:00:00.000Z",
       endAt: "2026-03-31T23:59:59.000Z",
     },
+    geoEligibleTrips: 0,
+    geoLinkedTrips: 0,
+    notGeoEligibleTrips: 0,
+    groupedTripsMatchedToPayments: 0,
+    unmatchedTripsInWindow: 0,
+    unmatchedPaymentGroupsInWindow: 0,
+    geoLinkedDatasetSample: [],
     locationEnrichedTrips: 3012,
   };
 
@@ -948,6 +1084,7 @@ app.post("/api/imports/:importId/confirm", (req, res) => {
     console.log("[IMPORT][confirm] stage=csv_extract_complete");
 
     const matchingSummary = computeFirstPassMatchingSummary(
+      importId,
       tripsSummary.dataRows,
       paymentsSummary.dataRows,
       tripsSummary.timestampFieldUsed,
@@ -987,6 +1124,9 @@ app.post("/api/imports/:importId/confirm", (req, res) => {
       `[IMPORT][confirm] geoLinkedTrips=${matchingSummary.geoLinkedTrips ?? 0} nearestAnalyticsToleranceSeconds=${matchingSummary.toleranceUsedSeconds ?? 60}`
     );
     console.log(
+      `[IMPORT][confirm] linkedRecordCount=${matchingSummary.geoLinkedDataset?.length ?? 0} geoLinkedDatasetSampleCount=${Math.min(5, matchingSummary.geoLinkedDataset?.length ?? 0)}`
+    );
+    console.log(
       `[IMPORT][confirm] matching tripsConsidered=${matchingSummary.diagnostics.tripsConsidered} paymentsConsidered=${matchingSummary.diagnostics.paymentsConsidered} tripTimestampField=${tripsSummary.timestampFieldUsed} paymentTimestampField=${paymentsSummary.timestampFieldUsed}`
     );
     console.log(
@@ -1016,10 +1156,13 @@ app.post("/api/imports/:importId/confirm", (req, res) => {
       ambiguousMatches: matchingSummary.ambiguousMatches,
       analyticsCoverageRange: matchingSummary.analyticsCoverageRange,
       geoLinkedTrips: matchingSummary.geoLinkedTrips,
-      geoEligibleTrips: matchingSummary.diagnostics.tripsInAnalyticsWindow ?? 0,
-      notGeoEligibleTrips:
-        tripsSummary.rowCount -
-        (matchingSummary.diagnostics.tripsInAnalyticsWindow ?? 0),
+      geoEligibleTrips: matchingSummary.geoEligibleTrips ?? 0,
+      notGeoEligibleTrips: matchingSummary.notGeoEligibleTrips ?? 0,
+      groupedTripsMatchedToPayments:
+        matchingSummary.groupedTripsMatchedToPayments ?? 0,
+      unmatchedTripsInWindow: matchingSummary.unmatchedTripsInWindow ?? 0,
+      unmatchedPaymentGroupsInWindow:
+        matchingSummary.unmatchedPaymentGroupsInWindow ?? 0,
       geoLinkedDatasetSample: (matchingSummary.geoLinkedDataset ?? []).slice(0, 5),
       parsedFileDetails: {
         trips: {
@@ -1046,6 +1189,12 @@ app.post("/api/imports/:importId/confirm", (req, res) => {
     console.log("[IMPORT][confirm] stage=summary_written");
     console.log(
       `[IMPORT][confirm] summary=${JSON.stringify(record.summary)}`
+    );
+
+    record.linkedDatasetArtifactPath = persistLinkedDatasetArtifact(
+      importId,
+      matchingSummary.geoLinkedDataset ?? [],
+      record.summary
     );
 
     record.stage = "parsing";
