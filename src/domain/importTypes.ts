@@ -56,6 +56,24 @@ export interface ImportResult {
   dataEndAt: string | null;
   warnings: string[];
   errors: string[];
+  uberImportSummary?: {
+    discovery: {
+      tripsFileFound: boolean;
+      paymentsFileFound: boolean;
+      analyticsFileFound: boolean;
+      ignoredFilesCount: number;
+    };
+    matchedTrips: number;
+    unmatchedTrips: number;
+    unmatchedPaymentGroups: number;
+    ambiguousMatches: number;
+    reimbursementsDetected: number;
+    analyticsCoverageRange: {
+      startAt: string | null;
+      endAt: string | null;
+    } | null;
+    locationEnrichedTrips: number;
+  };
 }
 
 export interface UploadStatusViewModel {

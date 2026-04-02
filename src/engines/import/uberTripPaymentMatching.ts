@@ -27,7 +27,7 @@ type ParsedCsv = {
 
 type PaymentScoredCandidate = {
   trip: UberTripCandidate;
-  anchorType: "dropoff" | "begintrip";
+  anchorType: "request" | "dropoff" | "begintrip";
   deltaMinutes: number;
   breakdown: UberMatchScoreBreakdown;
 };
@@ -65,10 +65,14 @@ export async function buildUberTripPaymentArtifactsFromZip(
 
   const zip = await JSZip.loadAsync(file.contentsBase64, { base64: true });
   const csvEntries = Object.values(zip.files).filter((entry) => !entry.dir && entry.name.toLowerCase().endsWith(".csv"));
+  const csvNames = csvEntries.map((entry) => entry.name);
 
-  const tripsEntry = findCsv(csvEntries.map((entry) => entry.name), ["driver_lifetime_trips", "lifetime_trips", "trips"]);
-  const paymentsEntry = findCsv(csvEntries.map((entry) => entry.name), ["payments", "payment", "driver_payments", "earnings"]);
-  const analyticsEntry = findCsv(csvEntries.map((entry) => entry.name), ["analytics", "location", "gps"]);
+  const tripsEntry = findCsv(csvNames, ["driver_lifetime_trips-", "driver_lifetime_trips", "lifetime_trips"]);
+  const paymentsEntry = findCsv(csvNames, ["driver_payments-", "driver_payments", "payments"]);
+  const analyticsEntry = findCsv(csvNames, ["driver_app_analytics-", "driver_app_analytics"]);
+  const ignoredFileNames = csvNames.filter(
+    (name) => name !== tripsEntry && name !== paymentsEntry && name !== analyticsEntry,
+  );
 
   if (!tripsEntry || !paymentsEntry) {
     throw new Error("Matching requires both trips and payments CSV files in the ZIP.");
@@ -92,10 +96,24 @@ export async function buildUberTripPaymentArtifactsFromZip(
     tripsFile: { fileName: tripsEntry, csvText: tripsCsv },
     paymentsFile: { fileName: paymentsEntry, csvText: paymentsCsv },
     analyticsFile: analyticsCsv && analyticsEntry ? { fileName: analyticsEntry, csvText: analyticsCsv } : null,
+    discovery: {
+      tripsFileFound: Boolean(tripsEntry),
+      paymentsFileFound: Boolean(paymentsEntry),
+      analyticsFileFound: Boolean(analyticsEntry),
+      tripsFileName: tripsEntry ?? null,
+      paymentsFileName: paymentsEntry ?? null,
+      analyticsFileName: analyticsEntry ?? null,
+      ignoredFilesCount: ignoredFileNames.length,
+      ignoredFileNames,
+    },
   });
 }
 
-export function buildUberTripPaymentArtifacts(input: UberMatchEngineInput): UberTripPaymentMatchArtifacts {
+export function buildUberTripPaymentArtifacts(
+  input: UberMatchEngineInput & {
+    discovery?: UberTripPaymentMatchArtifacts["discovery"];
+  },
+): UberTripPaymentMatchArtifacts {
   const trips = parseCsv(input.tripsFile);
   const payments = parseCsv(input.paymentsFile);
   const analytics = input.analyticsFile ? parseCsv(input.analyticsFile) : null;
@@ -112,7 +130,10 @@ export function buildUberTripPaymentArtifacts(input: UberMatchEngineInput): Uber
 
   if (!validation.ok) {
     return {
+      discovery:
+        input.discovery ?? fallbackDiscovery(input, []),
       validation,
+      tripCandidates: tripsCandidates,
       paymentGroups: paymentBuild.groups,
       matchedTrips: [],
       unmatchedTrips: tripsCandidates.map((trip) => ({
@@ -164,7 +185,10 @@ export function buildUberTripPaymentArtifacts(input: UberMatchEngineInput): Uber
   });
 
   return {
+    discovery:
+      input.discovery ?? fallbackDiscovery(input, []),
     validation,
+    tripCandidates: tripsCandidates,
     paymentGroups: paymentBuild.groups,
     matchedTrips: matchResult.matches,
     unmatchedTrips,
@@ -172,6 +196,22 @@ export function buildUberTripPaymentArtifacts(input: UberMatchEngineInput): Uber
     ambiguousMatches: matchResult.ambiguous,
     unknownClassification: paymentBuild.unknownRows,
     analyticsInference,
+  };
+}
+
+function fallbackDiscovery(
+  input: UberMatchEngineInput,
+  ignoredFileNames: string[],
+): UberTripPaymentMatchArtifacts["discovery"] {
+  return {
+    tripsFileFound: true,
+    paymentsFileFound: true,
+    analyticsFileFound: Boolean(input.analyticsFile),
+    tripsFileName: input.tripsFile.fileName,
+    paymentsFileName: input.paymentsFile.fileName,
+    analyticsFileName: input.analyticsFile?.fileName ?? null,
+    ignoredFilesCount: ignoredFileNames.length,
+    ignoredFileNames,
   };
 }
 
@@ -223,6 +263,16 @@ function validateMatchingDataset(args: {
   const warnings: string[] = [];
   if (overlapTripsAnalytics === false) {
     warnings.push("Analytics file does not overlap trip period; location inference disabled.");
+  } else if (
+    analyticsRange &&
+    tripsRange.startAt &&
+    tripsRange.endAt &&
+    analyticsRange.startAt &&
+    analyticsRange.endAt &&
+    (Date.parse(analyticsRange.startAt) > Date.parse(tripsRange.startAt) ||
+      Date.parse(analyticsRange.endAt) < Date.parse(tripsRange.endAt))
+  ) {
+    warnings.push("Analytics coverage is partial; location inference applies to recent overlapping range only.");
   }
 
   const currencyUnion = new Set([...tripsCurrencies, ...paymentsCurrencies]);
@@ -474,7 +524,12 @@ function assignTripsToPayments(
       tripUuid: group.tripUuid,
       matchedBy: best.anchorType,
       score: best.breakdown,
-      matchedAt: best.anchorType === "dropoff" ? best.trip.dropoffTimestamp : best.trip.beginTripTimestamp,
+      matchedAt:
+        best.anchorType === "request"
+          ? best.trip.requestTimestamp
+          : best.anchorType === "dropoff"
+            ? best.trip.dropoffTimestamp
+            : best.trip.beginTripTimestamp,
       tripDropoffTimestamp: best.trip.dropoffTimestamp,
       tripBeginTimestamp: best.trip.beginTripTimestamp,
       paymentTimestampAnchor: group.paymentTimestampAnchor,
@@ -506,17 +561,24 @@ function scoreCandidatesForPaymentGroup(
   for (const windowMinutes of DEFAULT_SEARCH_WINDOWS) {
     const scoped = trips
       .map((trip) => {
+        const requestDelta = minutesDelta(paymentAt, trip.requestTimestamp);
         const dropoffDelta = minutesDelta(paymentAt, trip.dropoffTimestamp);
         const beginDelta = minutesDelta(paymentAt, trip.beginTripTimestamp);
 
-        const candidates: Array<{ anchorType: "dropoff" | "begintrip"; delta: number | null }> = [
-          { anchorType: "dropoff", delta: dropoffDelta },
-          { anchorType: "begintrip", delta: beginDelta },
+        const candidates: Array<{ anchorType: "request" | "dropoff" | "begintrip"; delta: number | null; priority: number }> = [
+          { anchorType: "request", delta: requestDelta, priority: 1 },
+          { anchorType: "dropoff", delta: dropoffDelta, priority: 2 },
+          { anchorType: "begintrip", delta: beginDelta, priority: 3 },
         ];
 
         const bestAnchor = candidates
-          .filter((candidate): candidate is { anchorType: "dropoff" | "begintrip"; delta: number } => candidate.delta !== null)
-          .sort((a, b) => a.delta - b.delta)[0];
+          .filter((candidate): candidate is { anchorType: "request" | "dropoff" | "begintrip"; delta: number; priority: number } => candidate.delta !== null)
+          .sort((a, b) => {
+            if (a.delta === b.delta) {
+              return a.priority - b.priority;
+            }
+            return a.delta - b.delta;
+          })[0];
 
         if (!bestAnchor || bestAnchor.delta > windowMinutes) {
           return null;

@@ -2,6 +2,7 @@ import { buildCanonicalMetrics } from "../../domain/formulas";
 import { IntermediateTripRecord } from "../../domain/importTypes";
 import { TripNormalizedRow } from "../../domain/types";
 import { getDb } from "../../db/client";
+import { UberTripPaymentMatchArtifacts } from "../../contracts/uberMatching";
 import { NormalizedTripBundle } from "./normalizeUberTrip";
 
 export interface PersistImportPayload {
@@ -20,6 +21,7 @@ export interface PersistImportPayload {
   dataEndAt: string | null;
   sourceTrips: IntermediateTripRecord[];
   normalized: NormalizedTripBundle;
+  matchingArtifacts?: UberTripPaymentMatchArtifacts | null;
 }
 
 export interface PersistImportResult {
@@ -68,6 +70,37 @@ export async function persistImport(payload: PersistImportPayload): Promise<Pers
   );
 
   const now = payload.importedAt;
+
+  if (payload.matchingArtifacts) {
+    await db.runAsync(
+      `
+        INSERT INTO import_match_artifacts (
+          id, import_id, provider, discovery_json, validation_json,
+          matched_json, unmatched_json, ambiguous_json, unknown_json,
+          enrichment_json, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `,
+      [
+        `${payload.importId}-match-artifacts`,
+        payload.importId,
+        payload.provider,
+        JSON.stringify(payload.matchingArtifacts.discovery),
+        JSON.stringify(payload.matchingArtifacts.validation),
+        JSON.stringify({
+          paymentGroups: payload.matchingArtifacts.paymentGroups,
+          matchedTrips: payload.matchingArtifacts.matchedTrips,
+        }),
+        JSON.stringify({
+          unmatchedTrips: payload.matchingArtifacts.unmatchedTrips,
+          unmatchedPaymentGroups: payload.matchingArtifacts.unmatchedPaymentGroups,
+        }),
+        JSON.stringify(payload.matchingArtifacts.ambiguousMatches),
+        JSON.stringify(payload.matchingArtifacts.unknownClassification),
+        JSON.stringify(payload.matchingArtifacts.analyticsInference),
+        now,
+      ],
+    );
+  }
 
   for (let i = 0; i < payload.normalized.rawRows.length; i += 1) {
     const row = payload.normalized.rawRows[i];

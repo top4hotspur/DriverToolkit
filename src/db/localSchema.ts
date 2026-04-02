@@ -213,6 +213,19 @@
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
   );`,
+  `CREATE TABLE IF NOT EXISTS import_match_artifacts (
+    id TEXT PRIMARY KEY NOT NULL,
+    import_id TEXT NOT NULL,
+    provider TEXT NOT NULL,
+    discovery_json TEXT NOT NULL,
+    validation_json TEXT NOT NULL,
+    matched_json TEXT NOT NULL,
+    unmatched_json TEXT NOT NULL,
+    ambiguous_json TEXT NOT NULL,
+    unknown_json TEXT NOT NULL,
+    enrichment_json TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  );`,
   `CREATE TABLE IF NOT EXISTS vehicle_cost_history (
     id TEXT PRIMARY KEY NOT NULL,
     user_id TEXT NOT NULL,

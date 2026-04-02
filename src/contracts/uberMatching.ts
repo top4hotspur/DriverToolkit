@@ -77,7 +77,7 @@ export interface UberMatchScoreBreakdown {
 export interface UberTripPaymentMatchRow {
   tripId: string;
   tripUuid: string;
-  matchedBy: "dropoff" | "begintrip";
+  matchedBy: "request" | "dropoff" | "begintrip";
   score: UberMatchScoreBreakdown;
   matchedAt: string | null;
   tripDropoffTimestamp: string | null;
@@ -135,7 +135,18 @@ export interface UberTripAnalyticsInference {
 }
 
 export interface UberTripPaymentMatchArtifacts {
+  discovery: {
+    tripsFileFound: boolean;
+    paymentsFileFound: boolean;
+    analyticsFileFound: boolean;
+    tripsFileName: string | null;
+    paymentsFileName: string | null;
+    analyticsFileName: string | null;
+    ignoredFilesCount: number;
+    ignoredFileNames: string[];
+  };
   validation: UberMatchingValidationResult;
+  tripCandidates: UberTripCandidate[];
   paymentGroups: UberPaymentGroup[];
   matchedTrips: UberTripPaymentMatchRow[];
   unmatchedTrips: UberUnmatchedTripRow[];

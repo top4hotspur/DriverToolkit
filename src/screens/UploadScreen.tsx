@@ -1,4 +1,4 @@
-﻿import * as DocumentPicker from "expo-document-picker";
+import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system/legacy";
 import { useEffect, useState } from "react";
 import { Text, View } from "react-native";
@@ -185,6 +185,29 @@ function ImportResultSummary(props: { result: ImportResult }) {
       {result.dataStartAt && result.dataEndAt ? (
         <Text>{`Data range: ${formatDate(result.dataStartAt)} to ${formatDate(result.dataEndAt)}`}</Text>
       ) : null}
+      {result.uberImportSummary ? (
+        <View style={{ gap: 2 }}>
+          <Text>{`Trips file found: ${result.uberImportSummary.discovery.tripsFileFound ? "yes" : "no"}`}</Text>
+          <Text>{`Payments file found: ${result.uberImportSummary.discovery.paymentsFileFound ? "yes" : "no"}`}</Text>
+          <Text>{`Analytics file found: ${result.uberImportSummary.discovery.analyticsFileFound ? "yes" : "no"}`}</Text>
+          <Text>{`Ignored files: ${result.uberImportSummary.discovery.ignoredFilesCount}`}</Text>
+          <Text>{`Matched payment groups: ${result.uberImportSummary.matchedTrips}`}</Text>
+          <Text>{`Unmatched trips: ${result.uberImportSummary.unmatchedTrips}`}</Text>
+          <Text>{`Unmatched payments: ${result.uberImportSummary.unmatchedPaymentGroups}`}</Text>
+          <Text>{`Ambiguous matches: ${result.uberImportSummary.ambiguousMatches}`}</Text>
+          <Text>{`Reimbursements/adjustments detected: ${formatCurrency(result.uberImportSummary.reimbursementsDetected)}`}</Text>
+          {result.uberImportSummary.analyticsCoverageRange ? (
+            <Text>
+              {result.uberImportSummary.analyticsCoverageRange.startAt && result.uberImportSummary.analyticsCoverageRange.endAt
+                ? `Analytics coverage: ${formatDate(result.uberImportSummary.analyticsCoverageRange.startAt)} to ${formatDate(result.uberImportSummary.analyticsCoverageRange.endAt)}`
+                : "Analytics coverage: partial or unavailable"}
+            </Text>
+          ) : (
+            <Text>Analytics coverage: not provided</Text>
+          )}
+          <Text>{`Location-enriched trips: ${result.uberImportSummary.locationEnrichedTrips}`}</Text>
+        </View>
+      ) : null}
       {result.warnings.map((warning, index) => (
         <Text key={`warning-${index}`}>{`Warning: ${warning}`}</Text>
       ))}
@@ -211,10 +234,15 @@ async function toImportFileDescriptor(asset: DocumentPicker.DocumentPickerAsset)
 
 function buildStatusFromResult(selectedFileName: string, result: ImportResult): UploadStatusViewModel {
   if (result.ok) {
+    const summary = result.uberImportSummary;
+    const description = summary
+      ? `Imported ${result.tripCount} trips, matched ${summary.matchedTrips} payment groups, and left ${summary.unmatchedTrips} unmatched trips for review.`
+      : `Imported ${result.tripCount} trips and updated local truth metrics.`;
+
     return {
       phase: "success",
       title: "Import completed",
-      description: `Imported ${result.tripCount} trips and updated local truth metrics.`,
+      description,
       selectedFileName,
       result,
     };
@@ -239,3 +267,11 @@ function formatDate(dateIso: string): string {
   });
 }
 
+function formatCurrency(value: number): string {
+  return new Intl.NumberFormat("en-GB", {
+    style: "currency",
+    currency: "GBP",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(value);
+}
