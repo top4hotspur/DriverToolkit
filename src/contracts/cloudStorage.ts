@@ -90,6 +90,39 @@ export interface PresignedUploadIntent {
   presignedUrl: string;
 }
 
+export interface ExpensePresignRequest {
+  userId: string;
+  expenseId: string;
+  fileType: string;
+}
+
+export interface ExpensePresignResponse extends PresignedUploadIntent {}
+
+export interface ExpenseSaveApiRequest {
+  expenseId: string;
+  userId: string;
+  amount: number;
+  category: ExpenseRecord["category"];
+  type: ExpenseRecord["expenseType"];
+  date: string;
+  paymentMethod: ExpenseRecord["paymentMethod"];
+  note: string | null;
+  receiptRequiredStatus: ExpenseRecord["receiptRequiredStatus"];
+  receiptS3Key: string | null;
+  fuelLitres: number | null;
+  fuelPricePerLitre: number | null;
+  fuelTotal: number | null;
+  createdAt: string;
+  updatedAt: string;
+  syncStatus: ExpenseRecord["localSyncStatus"];
+  receiptFileMetadata?: {
+    fileId: string;
+    mimeType: string | null;
+    originalFilename: string | null;
+    fileSizeBytes: number | null;
+  } | null;
+}
+
 export interface CloudSyncConfig {
   apiBaseUrl: string;
   region: string;

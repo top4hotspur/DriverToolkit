@@ -1,6 +1,12 @@
-﻿import { buildReceiptUploadIntent, getCloudSyncConfig } from "./storageScaffold";
+import {
+  ExpensePresignResponse,
+  ExpenseSaveApiRequest,
+  PresignedUploadIntent,
+} from "../../contracts/cloudStorage";
+import { getCloudSyncConfig } from "./storageScaffold";
 
 export interface ReceiptUploadPayload {
+  expenseId: string;
   receiptFileId: string;
   localUri: string;
   mimeType: string | null;
@@ -60,11 +66,11 @@ export async function uploadReceiptToCloud(args: {
   }
 
   try {
-    const intent = await buildReceiptUploadIntent({
+    const intent = await requestExpensePresign({
+      apiBaseUrl: config.apiBaseUrl,
       userId: args.userId,
-      receiptFileId: args.file.receiptFileId,
-      mimeType: args.file.mimeType ?? "application/octet-stream",
-      originalFileName: args.file.originalFileName ?? `${args.file.receiptFileId}.bin`,
+      expenseId: args.file.expenseId,
+      fileType: args.file.mimeType ?? "application/octet-stream",
     });
 
     const fileResponse = await fetch(args.file.localUri);
@@ -106,12 +112,39 @@ export async function syncExpenseMetadataToCloud(payload: CloudExpenseSyncPayloa
   }
 
   try {
-    const response = await fetch(`${config.apiBaseUrl}/metadata/expenses`, {
+    const requestPayload: ExpenseSaveApiRequest = {
+      expenseId: payload.expense.expenseId,
+      userId: payload.expense.userId,
+      amount: payload.expense.amountGbp,
+      category: payload.expense.category as ExpenseSaveApiRequest["category"],
+      type: payload.expense.expenseType as ExpenseSaveApiRequest["type"],
+      date: payload.expense.expenseDate,
+      paymentMethod: payload.expense.paymentMethod as ExpenseSaveApiRequest["paymentMethod"],
+      note: payload.expense.note,
+      receiptRequiredStatus: payload.expense.receiptRequiredStatus as ExpenseSaveApiRequest["receiptRequiredStatus"],
+      receiptS3Key: payload.receipt?.cloudObjectKey ?? null,
+      fuelLitres: payload.expense.fuelLitres,
+      fuelPricePerLitre: payload.expense.fuelPricePerLitre,
+      fuelTotal: payload.expense.fuelTotal,
+      createdAt: payload.expense.createdAt,
+      updatedAt: payload.expense.updatedAt,
+      syncStatus: "synced",
+      receiptFileMetadata: payload.receipt
+        ? {
+            fileId: payload.receipt.fileId,
+            mimeType: payload.receipt.mimeType,
+            originalFilename: payload.receipt.originalFilename,
+            fileSizeBytes: payload.receipt.fileSizeBytes,
+          }
+        : null,
+    };
+
+    const response = await fetch(`${config.apiBaseUrl}/api/expenses/save`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
       },
-      body: JSON.stringify(payload),
+      body: JSON.stringify(requestPayload),
     });
 
     if (!response.ok) {
@@ -130,3 +163,34 @@ export async function syncExpenseMetadataToCloud(payload: CloudExpenseSyncPayloa
   }
 }
 
+async function requestExpensePresign(args: {
+  apiBaseUrl: string;
+  userId: string;
+  expenseId: string;
+  fileType: string;
+}): Promise<PresignedUploadIntent> {
+  const response = await fetch(`${args.apiBaseUrl}/api/expenses/presign`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      userId: args.userId,
+      expenseId: args.expenseId,
+      fileType: args.fileType,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Presign request failed (${response.status}).`);
+  }
+
+  const payload = (await response.json()) as ExpensePresignResponse;
+  return {
+    objectKey: payload.objectKey,
+    contentType: payload.contentType,
+    expiresInSeconds: payload.expiresInSeconds,
+    method: "PUT",
+    presignedUrl: payload.presignedUrl,
+  };
+}

@@ -14,7 +14,7 @@ export function getCloudSyncConfig(): CloudSyncConfig | null {
   const receiptsBucket = process.env.EXPO_PUBLIC_AWS_RECEIPTS_BUCKET;
   const importsBucket = process.env.EXPO_PUBLIC_AWS_IMPORTS_BUCKET;
 
-  if (!apiBaseUrl || !region || !receiptsBucket || !importsBucket) {
+  if (!apiBaseUrl || !region || !receiptsBucket) {
     return null;
   }
 
@@ -22,7 +22,7 @@ export function getCloudSyncConfig(): CloudSyncConfig | null {
     apiBaseUrl,
     region,
     receiptsBucket,
-    importsBucket,
+    importsBucket: importsBucket ?? receiptsBucket,
   };
 }
 

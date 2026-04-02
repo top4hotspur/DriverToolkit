@@ -247,7 +247,9 @@ async function syncExpenseToCloud(expenseId: string): Promise<LocalSyncStatus> {
       )
     : null;
 
-  if (receipt && receipt.localUri) {
+  let syncedReceipt = receipt;
+
+  if (receipt && receipt.localUri && (receipt.uploadStatus !== "uploaded" || !receipt.cloudObjectKey)) {
     await db.runAsync(
       `
         UPDATE receipt_files
@@ -260,6 +262,7 @@ async function syncExpenseToCloud(expenseId: string): Promise<LocalSyncStatus> {
     const upload = await uploadReceiptToCloud({
       userId: expense.userId,
       file: {
+        expenseId: expense.id,
         receiptFileId: receipt.fileId,
         localUri: receipt.localUri,
         mimeType: receipt.mimeType,
@@ -287,6 +290,14 @@ async function syncExpenseToCloud(expenseId: string): Promise<LocalSyncStatus> {
       `,
       ["uploaded", upload.objectKey ?? null, now, now, receipt.fileId],
     );
+
+    syncedReceipt = {
+      ...receipt,
+      cloudObjectKey: upload.objectKey ?? null,
+      uploadStatus: "uploaded",
+      uploadedAt: now,
+      updatedAt: now,
+    };
   }
 
   const metadataSync = await syncExpenseMetadataToCloud({
@@ -307,16 +318,16 @@ async function syncExpenseToCloud(expenseId: string): Promise<LocalSyncStatus> {
       createdAt: expense.createdAt,
       updatedAt: expense.updatedAt,
     },
-    receipt: receipt
+    receipt: syncedReceipt
       ? {
-          fileId: receipt.fileId,
-          mimeType: receipt.mimeType,
-          originalFilename: receipt.originalFilename,
-          fileSizeBytes: receipt.fileSizeBytes,
+          fileId: syncedReceipt.fileId,
+          mimeType: syncedReceipt.mimeType,
+          originalFilename: syncedReceipt.originalFilename,
+          fileSizeBytes: syncedReceipt.fileSizeBytes,
           storageProvider: "s3",
-          cloudObjectKey: receipt.cloudObjectKey,
-          uploadStatus: receipt.uploadStatus,
-          uploadedAt: receipt.uploadedAt,
+          cloudObjectKey: syncedReceipt.cloudObjectKey,
+          uploadStatus: syncedReceipt.uploadStatus,
+          uploadedAt: syncedReceipt.uploadedAt,
         }
       : null,
   });
