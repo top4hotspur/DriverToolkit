@@ -153,6 +153,9 @@ export interface BackendImportSummary {
   paymentsFileFound: boolean;
   analyticsFileFound: boolean;
   ignoredFilesCount: number;
+  tripsRowCount?: number;
+  paymentsRowCount?: number;
+  analyticsRowCount?: number;
   tripsDateRange: { startAt: string | null; endAt: string | null };
   paymentsDateRange: { startAt: string | null; endAt: string | null };
   analyticsDateRange: { startAt: string | null; endAt: string | null } | null;
@@ -162,6 +165,71 @@ export interface BackendImportSummary {
   ambiguousMatches: number;
   reimbursementsDetected: number;
   analyticsCoverageRange: { startAt: string | null; endAt: string | null } | null;
+  geoEligibleTrips?: number;
+  geoLinkedTrips?: number;
+  notGeoEligibleTrips?: number;
+  groupedTripsMatchedToPayments?: number;
+  unmatchedTripsInWindow?: number;
+  unmatchedPaymentGroupsInWindow?: number;
+  geoLinkedDatasetSample?: Array<{
+    linkedTripId: string;
+    sourceImportId: string;
+    provider: "uber";
+    matchMode: "payment_group_timestamp";
+    matchConfidence: "high" | "medium" | "low";
+    toleranceUsedSeconds: number;
+    geoEligible: boolean;
+    geoEligibilityReason:
+      | "inside_analytics_window"
+      | "outside_analytics_window"
+      | "no_nearby_analytics_event";
+    locationLinked: boolean;
+    trip: {
+      requestTimestamp: string | null;
+      beginTimestamp: string | null;
+      dropoffTimestamp: string | null;
+      status: string | null;
+      productName: string | null;
+      distanceMiles: number | null;
+      durationSeconds: number | null;
+      currencyCode: string | null;
+      vehicleUuid: string | null;
+      licensePlate: string | null;
+    };
+    paymentGroup: {
+      tripUuid: string | null;
+      groupedTimestamp: string | null;
+      currencyCode: string | null;
+      rowCount: number;
+      financialTotal: number | null;
+      rawClassifications: string[];
+      rawCategories: string[];
+    };
+    analytics: {
+      eventTimestamp: string | null;
+      eventType: string | null;
+      latitude: number | null;
+      longitude: number | null;
+      speedGps: number | null;
+      city: string | null;
+      driverOnline: boolean | null;
+    };
+    location: {
+      lat: number | null;
+      lng: number | null;
+      source: "driver_app_analytics";
+      resolvedAreaLabel: string | null;
+      locationConfidence: "high" | "medium" | "low" | null;
+    };
+    flags: {
+      hasTrip: boolean;
+      hasPaymentGroup: boolean;
+      hasAnalytics: boolean;
+      insideAnalyticsWindow: boolean;
+      timestampAligned: boolean;
+      requiresReview: boolean;
+    };
+  }>;
   locationEnrichedTrips: number;
 }
 

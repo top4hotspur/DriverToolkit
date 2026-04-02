@@ -15,10 +15,14 @@ export function UberImportReviewScreen() {
 
   useEffect(() => {
     let active = true;
+    const log = (event: string, payload?: Record<string, unknown>) => {
+      console.log(`[DT][import] ${event}`, payload ?? {});
+    };
 
     async function load() {
       setLoading(true);
       try {
+        log("review-fetch-start");
         await initDatabase();
         const latest = await getLatestUberImportReview();
         if (!active) {
@@ -31,15 +35,27 @@ export function UberImportReviewScreen() {
             return;
           }
           setBackendStatusReview(persisted);
+          log("review-fetch-success", {
+            source: persisted ? "persisted-backend-status" : "none",
+            importId: persisted?.importId ?? null,
+            stage: persisted?.stage ?? null,
+          });
         } else {
           setBackendStatusReview(null);
+          log("review-fetch-success", {
+            source: "local-import-artifacts",
+            importId: latest.importId,
+          });
         }
         setError(null);
-      } catch {
+      } catch (error) {
         if (!active) {
           return;
         }
         setError("Couldn't load the latest import review right now.");
+        log("review-fetch-fail", {
+          error: error instanceof Error ? error.message : "Unknown review fetch error",
+        });
       } finally {
         if (active) {
           setLoading(false);
@@ -66,21 +82,64 @@ export function UberImportReviewScreen() {
         <Card title="No Import Review Yet">
           {backendStatusReview ? (
             <View style={{ gap: 4 }}>
-              <Text>Showing latest backend import summary.</Text>
+              <Text>Showing latest backend geo-financial import summary.</Text>
               <KeyValueRow label="Import ID" value={backendStatusReview.importId} />
               <KeyValueRow label="Status" value={backendStatusReview.stage} />
               <KeyValueRow label="Source file" value={backendStatusReview.sourceFileName} />
               <KeyValueRow label="Started" value={formatUkDateTime(backendStatusReview.startedAt)} />
+              <Text style={{ marginTop: 8, fontWeight: "600" }}>Coverage</Text>
               <KeyValueRow
-                label="Matched trips/payment groups"
-                value={String(backendStatusReview.summary?.matchedTrips ?? 0)}
+                label="Analytics coverage"
+                value={
+                  backendStatusReview.summary?.analyticsCoverageRange?.startAt &&
+                  backendStatusReview.summary?.analyticsCoverageRange?.endAt
+                    ? `${formatUkDateTime(backendStatusReview.summary.analyticsCoverageRange.startAt)} to ${formatUkDateTime(backendStatusReview.summary.analyticsCoverageRange.endAt)}`
+                    : "Not available"
+                }
               />
-              <KeyValueRow label="Unmatched trips" value={String(backendStatusReview.summary?.unmatchedTrips ?? 0)} />
               <KeyValueRow
-                label="Unmatched payments"
-                value={String(backendStatusReview.summary?.unmatchedPayments ?? 0)}
+                label="Geo-eligible trips"
+                value={String(backendStatusReview.summary?.geoEligibleTrips ?? 0)}
               />
-              <KeyValueRow label="Ambiguous matches" value={String(backendStatusReview.summary?.ambiguousMatches ?? 0)} />
+              <KeyValueRow
+                label="Geo-linked trips"
+                value={String(backendStatusReview.summary?.geoLinkedTrips ?? 0)}
+              />
+              <KeyValueRow
+                label="Not geo-eligible trips"
+                value={String(backendStatusReview.summary?.notGeoEligibleTrips ?? 0)}
+              />
+
+              <Text style={{ marginTop: 8, fontWeight: "600" }}>Matching Quality</Text>
+              <KeyValueRow
+                label="Grouped trips matched to payments"
+                value={String(backendStatusReview.summary?.groupedTripsMatchedToPayments ?? 0)}
+              />
+              <KeyValueRow
+                label="Unmatched trips in analytics window"
+                value={String(backendStatusReview.summary?.unmatchedTripsInWindow ?? 0)}
+              />
+              <KeyValueRow
+                label="Unmatched payment groups in analytics window"
+                value={String(backendStatusReview.summary?.unmatchedPaymentGroupsInWindow ?? 0)}
+              />
+
+              <Text style={{ marginTop: 8, fontWeight: "600" }}>Sample Linked Records</Text>
+              {(backendStatusReview.summary?.geoLinkedDatasetSample ?? []).length === 0 ? (
+                <Text>No linked records available yet.</Text>
+              ) : (
+                (backendStatusReview.summary?.geoLinkedDatasetSample ?? []).map((item, index) => (
+                  <View key={`${item.linkedTripId}-${index}`} style={{ marginBottom: 8 }}>
+                    <Text>{`Trip request: ${item.trip.requestTimestamp ? formatUkDateTime(item.trip.requestTimestamp) : "n/a"}`}</Text>
+                    <Text>{`Financial total: ${item.paymentGroup.financialTotal == null ? "n/a" : formatGBP(item.paymentGroup.financialTotal)}`}</Text>
+                    <Text>{`Analytics event: ${item.analytics.eventTimestamp ? formatUkDateTime(item.analytics.eventTimestamp) : "n/a"}`}</Text>
+                    <Text>{`Lat/Lng: ${item.analytics.latitude ?? "n/a"}, ${item.analytics.longitude ?? "n/a"}`}</Text>
+                    <Text>{`Speed: ${item.analytics.speedGps ?? "n/a"}`}</Text>
+                    <Text>{`Event type: ${item.analytics.eventType ?? "n/a"}`}</Text>
+                    <Text>{`Confidence: ${item.matchConfidence}`}</Text>
+                  </View>
+                ))
+              )}
             </View>
           ) : (
             <Text>Import an Uber ZIP first, then review matching quality here.</Text>
