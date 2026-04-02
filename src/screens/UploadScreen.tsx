@@ -10,6 +10,7 @@ import { importUberPrivacyZip } from "../engines/import/importUberPrivacyZip";
 import { NewAchievementDetectionResult } from "../contracts/newAchievements";
 import { detectNewAchievementsAfterImport } from "../presentation/newAchievements";
 import { createIdleUploadStatus, uploadStatusCopy } from "../presentation/placeholderUpload";
+import { queuePrivacyImportFileMetadata } from "../state/cloudFileState";
 import { Card, PrimaryButton, ScreenShell } from "./ui";
 
 export function UploadScreen() {
@@ -90,6 +91,13 @@ export function UploadScreen() {
       setStatus(buildStatusFromResult(asset.name, result));
 
       if (result.ok && result.importedAt) {
+        await queuePrivacyImportFileMetadata({
+          provider: "uber",
+          sourceFileName: result.sourceFileName,
+          localUri: asset.uri,
+          fileSizeBytes: asset.size ?? null,
+          importedAt: result.importedAt,
+        });
         setLatestSummary({
           sourceFileName: result.sourceFileName,
           importedAt: result.importedAt,

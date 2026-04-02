@@ -16,11 +16,11 @@ import { detectNewAchievementsAfterImport } from "../presentation/newAchievement
 import {
   placeholderBeenHereBefore,
   placeholderDashboard,
-  placeholderOnlineGuidance,
   placeholderUsuallyNext,
 } from "../presentation/placeholderData";
 import { getOfflineContextualAchievementHighlight } from "../presentation/placeholderAchievements";
 import { getCaughtUpState } from "../presentation/offlineTasks";
+import { buildRecommendedActionTemplate } from "../presentation/recommendedActionCopy";
 import { completeOutstandingAction, getOutstandingActions } from "../state/offlineActions";
 import { getAppSettings } from "../state/settingsState";
 import { getSessionState, setCurrentAreaLabel, setSessionMode } from "../state/sessionState";
@@ -53,6 +53,7 @@ const defaultMileageSummary: BusinessMileageSummary = {
 export function DashboardScreen() {
   const router = useRouter();
   const pulse = useRef(new Animated.Value(0)).current;
+  const areaAttemptsRef = useRef(0);
 
   const [session, setSession] = useState<SessionStateModel>({
     mode: "offline",
@@ -72,6 +73,7 @@ export function DashboardScreen() {
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [isToggling, setIsToggling] = useState(false);
   const [liveNow, setLiveNow] = useState(() => Date.now());
+  const [areaResolutionAttempts, setAreaResolutionAttempts] = useState(0);
 
   const refreshCanonicalState = useCallback(
     async (options?: { suppressError?: boolean }) => {
@@ -185,6 +187,8 @@ export function DashboardScreen() {
 
   useEffect(() => {
     if (session.mode !== "online") {
+      setAreaResolutionAttempts(0);
+      areaAttemptsRef.current = 0;
       return;
     }
 
@@ -192,34 +196,77 @@ export function DashboardScreen() {
 
     const refreshAreaLabel = async () => {
       try {
+        logLocation("refresh-start", { mode: session.mode });
         const permission = await Location.getForegroundPermissionsAsync();
+        logLocation("permission-check", { status: permission.status });
         if (permission.status !== "granted") {
           const requested = await Location.requestForegroundPermissionsAsync();
+          logLocation("permission-request", { status: requested.status });
           if (requested.status !== "granted") {
             if (active) {
-              setActionMessage("Location permission is needed for live area labels while online.");
+              areaAttemptsRef.current += 1;
+              setAreaResolutionAttempts(areaAttemptsRef.current);
+              if (areaAttemptsRef.current >= 2) {
+                setActionMessage("Location permission is needed for live area labels while online.");
+              }
             }
             return;
           }
         }
 
-        const position = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+        const position =
+          (await Location.getLastKnownPositionAsync()) ??
+          (await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }));
+        if (!position) {
+          logLocation("coords-missing", {});
+          if (active) {
+            areaAttemptsRef.current += 1;
+            setAreaResolutionAttempts(areaAttemptsRef.current);
+            if (areaAttemptsRef.current >= 3) {
+              setActionMessage("Still resolving your live area. Keep moving for a clearer GPS fix.");
+            }
+          }
+          return;
+        }
+
+        logLocation("coords-received", {
+          latitude: position.coords.latitude,
+          longitude: position.coords.longitude,
+        });
         const label = await deriveAreaLabel(position.coords.latitude, position.coords.longitude);
+        logLocation("reverse-geocode-label", { label });
 
         if (!active || !label) {
+          if (active) {
+            areaAttemptsRef.current += 1;
+            setAreaResolutionAttempts(areaAttemptsRef.current);
+            if (areaAttemptsRef.current >= 3) {
+              setActionMessage("Still resolving your live area. Keep moving for a clearer GPS fix.");
+            }
+          }
           return;
         }
 
         if (label !== session.currentAreaLabel) {
           await setCurrentAreaLabel(label);
+          logLocation("live-area-applied", { label });
           if (!active) {
             return;
           }
           setSession((prev) => ({ ...prev, currentAreaLabel: label }));
         }
+        areaAttemptsRef.current = 0;
+        setAreaResolutionAttempts(0);
+        if (actionMessage?.startsWith("Still resolving")) {
+          setActionMessage(null);
+        }
       } catch {
         if (active) {
-          setActionMessage("We couldn't refresh your live area just now.");
+          areaAttemptsRef.current += 1;
+          setAreaResolutionAttempts(areaAttemptsRef.current);
+          if (areaAttemptsRef.current >= 3) {
+            setActionMessage("We couldn't refresh your live area just now.");
+          }
         }
       }
     };
@@ -366,6 +413,11 @@ export function DashboardScreen() {
   }
 
   const userFacingAction = mapDecisionLabel(rec.action);
+  const recommendedTemplate = buildRecommendedActionTemplate({
+    recommendation: rec,
+    favouriteOrAreaLabel: startPoints[0]?.outwardCode ?? "BT7",
+    hasNearbyAlternative: startPoints.length > 0,
+  });
   const currentOnlineSeconds =
     session.mode === "online" && session.trackingStartedAt
       ? session.accumulatedOnlineSeconds + Math.max(0, Math.floor((liveNow - new Date(session.trackingStartedAt).getTime()) / 1000))
@@ -413,9 +465,9 @@ export function DashboardScreen() {
               evidenceDetail={evidenceDetailFromSample(rec.sampleSize, "similar periods")}
             />
             <Text>{`Basis: ${rec.basisWindow.label}`}</Text>
-            <Text>{placeholderOnlineGuidance.areaStrength}</Text>
-            <Text>{placeholderOnlineGuidance.shiftHint}</Text>
-            <Text>{placeholderOnlineGuidance.nearbyAlternative}</Text>
+            <Text>{renderHighlightedTemplate(recommendedTemplate.areaStrength)}</Text>
+            <Text>{renderHighlightedTemplate(recommendedTemplate.stayGuidance)}</Text>
+            <Text>{renderHighlightedTemplate(recommendedTemplate.nearbyGuidance)}</Text>
           </Card>
 
           <Card title="What Usually Happens Here?">
@@ -438,8 +490,8 @@ export function DashboardScreen() {
 
           <Card title="Quick Actions">
             <View style={styles.quickActionsRow}>
-              <PrimaryButton label="Upload expense" onPress={() => router.push("/reports")} />
-              <PrimaryButton label="Add cash expense" onPress={() => router.push("/reports")} />
+              <PrimaryButton label="Upload expense" onPress={() => router.push("/expenses/upload")} />
+              <PrimaryButton label="Add cash expense" onPress={() => router.push("/expenses/cash")} />
             </View>
           </Card>
         </>
@@ -509,8 +561,8 @@ export function DashboardScreen() {
 
           <Card title="Quick Actions">
             <View style={styles.quickActionsRow}>
-              <PrimaryButton label="Upload expense" onPress={() => router.push("/reports")} />
-              <PrimaryButton label="Add cash expense" onPress={() => router.push("/reports")} />
+              <PrimaryButton label="Upload expense" onPress={() => router.push("/expenses/upload")} />
+              <PrimaryButton label="Add cash expense" onPress={() => router.push("/expenses/cash")} />
             </View>
           </Card>
         </>
@@ -560,6 +612,19 @@ function mapDecisionLabel(action: "stay" | "reposition" | "avoid" | "short-wait-
   return "Short wait only";
 }
 
+function renderHighlightedTemplate(template: string) {
+  const pieces = template.split("**");
+  return pieces.map((piece, index) => (
+    <Text key={`${piece}-${index}`} style={index % 2 === 1 ? styles.highlightKeyword : undefined}>
+      {piece}
+    </Text>
+  ));
+}
+
+function logLocation(event: string, payload: Record<string, unknown>): void {
+  console.log(`[DT][location] ${event}`, payload);
+}
+
 const styles = StyleSheet.create({
   statusPill: {
     alignSelf: "flex-start",
@@ -603,6 +668,10 @@ const styles = StyleSheet.create({
   decisionHeadline: {
     fontWeight: "700",
     fontSize: 22,
+  },
+  highlightKeyword: {
+    fontWeight: "700",
+    color: "#214e3f",
   },
   quickActionsRow: {
     flexDirection: "row",

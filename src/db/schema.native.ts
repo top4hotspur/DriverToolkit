@@ -64,6 +64,7 @@ async function runSchemaMigrations(): Promise<void> {
     { name: "original_file_name", sqlType: "TEXT" },
     { name: "file_size_bytes", sqlType: "INTEGER" },
     { name: "sync_state", sqlType: "TEXT DEFAULT 'local-only'" },
+    { name: "receipt_file_id", sqlType: "TEXT" },
   ]);
 
   await addMissingColumns("app_settings", [
@@ -85,6 +86,40 @@ async function runSchemaMigrations(): Promise<void> {
       start_area_label TEXT,
       end_area_label TEXT,
       created_at TEXT NOT NULL
+    )
+  `);
+
+  await db.execAsync(`
+    CREATE TABLE IF NOT EXISTS receipt_files (
+      id TEXT PRIMARY KEY NOT NULL,
+      expense_id TEXT,
+      local_uri TEXT NOT NULL,
+      mime_type TEXT,
+      original_file_name TEXT,
+      file_size_bytes INTEGER,
+      cloud_object_key TEXT,
+      cloud_bucket TEXT,
+      cloud_region TEXT,
+      upload_status TEXT NOT NULL DEFAULT 'local-only',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )
+  `);
+
+  await db.execAsync(`
+    CREATE TABLE IF NOT EXISTS privacy_import_files (
+      id TEXT PRIMARY KEY NOT NULL,
+      provider TEXT NOT NULL,
+      source_file_name TEXT NOT NULL,
+      local_uri TEXT,
+      file_size_bytes INTEGER,
+      cloud_object_key TEXT,
+      cloud_bucket TEXT,
+      cloud_region TEXT,
+      upload_status TEXT NOT NULL DEFAULT 'local-only',
+      imported_at TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
     )
   `);
 }
