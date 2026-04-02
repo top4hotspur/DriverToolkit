@@ -11,7 +11,8 @@ export interface CloudExpenseSyncPayload {
   expense: {
     expenseId: string;
     userId: string;
-    type: string;
+    category: string;
+    expenseType: string;
     paymentMethod: string;
     amountGbp: number;
     expenseDate: string;

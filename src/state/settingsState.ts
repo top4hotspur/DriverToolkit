@@ -9,6 +9,7 @@ let settings: AppSettingsModel = {
   trainingHoursCompleted: 7.25,
   taxCorrectToDate: "2026-03-30",
   maxStartShiftTravelRadiusMiles: 5,
+  vehicleExpenseMethod: "simplified_mileage",
 };
 
 export async function getAppSettings(): Promise<AppSettingsModel> {

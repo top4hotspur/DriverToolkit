@@ -12,6 +12,7 @@ const defaultSettings: AppSettingsModel = {
   trainingHoursCompleted: 7.25,
   taxCorrectToDate: "2026-03-30",
   maxStartShiftTravelRadiusMiles: 5,
+  vehicleExpenseMethod: "simplified_mileage",
 };
 
 export async function getAppSettings(): Promise<AppSettingsModel> {
@@ -25,9 +26,10 @@ export async function getAppSettings(): Promise<AppSettingsModel> {
     insuranceDueDate: string | null;
     operatorLicenceDueDate: string | null;
     trainingHoursCompleted: number;
-    taxCorrectToDate: string | null;
-    maxStartShiftTravelRadiusMiles: number;
-  }>(`
+      taxCorrectToDate: string | null;
+      maxStartShiftTravelRadiusMiles: number;
+      vehicleExpenseMethod: AppSettingsModel["vehicleExpenseMethod"];
+    }>(`
     SELECT
       tax_savings_amount as taxSavingsAmount,
       estimated_tax_liability as estimatedTaxLiability,
@@ -36,7 +38,8 @@ export async function getAppSettings(): Promise<AppSettingsModel> {
       operator_licence_due_date as operatorLicenceDueDate,
       training_hours_completed as trainingHoursCompleted,
       tax_correct_to_date as taxCorrectToDate,
-      max_start_shift_travel_radius_miles as maxStartShiftTravelRadiusMiles
+      max_start_shift_travel_radius_miles as maxStartShiftTravelRadiusMiles,
+      vehicle_expense_method as vehicleExpenseMethod
     FROM app_settings
     WHERE id = ?
   `, [SETTINGS_ID]);
@@ -59,6 +62,7 @@ export async function saveAppSettings(next: AppSettingsModel): Promise<void> {
           training_hours_completed = ?,
           tax_correct_to_date = ?,
           max_start_shift_travel_radius_miles = ?,
+          vehicle_expense_method = ?,
           updated_at = ?
       WHERE id = ?
     `,
@@ -71,6 +75,7 @@ export async function saveAppSettings(next: AppSettingsModel): Promise<void> {
       next.trainingHoursCompleted,
       next.taxCorrectToDate,
       next.maxStartShiftTravelRadiusMiles,
+      next.vehicleExpenseMethod,
       new Date().toISOString(),
       SETTINGS_ID,
     ],
@@ -96,8 +101,8 @@ async function ensureSettingsRow(): Promise<void> {
         psv_due_date, insurance_due_date,
         operator_licence_due_date, training_hours_completed,
         tax_correct_to_date,
-        max_start_shift_travel_radius_miles, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        max_start_shift_travel_radius_miles, vehicle_expense_method, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `,
     [
       SETTINGS_ID,
@@ -109,6 +114,7 @@ async function ensureSettingsRow(): Promise<void> {
       defaultSettings.trainingHoursCompleted,
       defaultSettings.taxCorrectToDate,
       defaultSettings.maxStartShiftTravelRadiusMiles,
+      defaultSettings.vehicleExpenseMethod,
       now,
     ],
   );

@@ -1,17 +1,26 @@
 ﻿import * as DocumentPicker from "expo-document-picker";
+import { useRouter } from "expo-router";
 import { useEffect, useMemo, useState } from "react";
 import { Text, TextInput, View } from "react-native";
-import { ExpenseInput, ExpensePaymentMethod, ExpenseType, LocalSyncStatus, ReceiptRequiredStatus } from "../contracts/expenses";
+import {
+  ExpenseCategory,
+  ExpenseInput,
+  ExpensePaymentMethod,
+  EXPENSE_CATEGORY_OPTIONS,
+  LocalSyncStatus,
+  ReceiptRequiredStatus,
+  getExpenseCategoryLabel,
+} from "../contracts/expenses";
 import { initDatabase } from "../db/schema";
 import { getExpenseSyncStatus, retryExpenseSync, saveExpense } from "../state/expenseState";
 import { formatGBP, formatUkDate } from "../utils/format";
 import { Card, PrimaryButton, ScreenShell } from "./ui";
 
-const EXPENSE_TYPES: ExpenseType[] = ["fuel", "parking", "cleaning", "food", "toll", "other"];
 const PAYMENT_METHODS: ExpensePaymentMethod[] = ["card", "cash", "other"];
 
 export function ExpenseUploadScreen() {
-  const [type, setType] = useState<ExpenseType>("fuel");
+  const router = useRouter();
+  const [category, setCategory] = useState<ExpenseCategory>("fuel");
   const [paymentMethod, setPaymentMethod] = useState<ExpensePaymentMethod>("card");
   const [amountInput, setAmountInput] = useState("");
   const [dateInput, setDateInput] = useState(new Date().toISOString().slice(0, 10));
@@ -55,7 +64,7 @@ export function ExpenseUploadScreen() {
   };
 
   const deriveFuelValues = () => {
-    if (type !== "fuel") {
+    if (category !== "fuel") {
       return;
     }
 
@@ -130,7 +139,7 @@ export function ExpenseUploadScreen() {
       return;
     }
 
-    if (type === "fuel") {
+    if (category === "fuel") {
       if (!confirmedFuelPricePerLitre) {
         setStatusLabel("Confirm fuel values before saving this fuel expense.");
         setStatusTone("needs-retry");
@@ -149,7 +158,8 @@ export function ExpenseUploadScreen() {
     setStatusTone("syncing");
 
     const payload: ExpenseInput = {
-      type,
+      category,
+      expenseType: "upload_receipt",
       paymentMethod,
       amountGbp: parsedAmount,
       expenseDate: dateInput,
@@ -160,10 +170,10 @@ export function ExpenseUploadScreen() {
       mimeType: selectedFile?.mimeType ?? null,
       originalFileName: selectedFile?.name ?? null,
       fileSizeBytes: selectedFile?.size ?? null,
-      fuelLitres: type === "fuel" ? Number(fuelLitresInput) : null,
-      fuelPricePerLitre: type === "fuel" ? Number(fuelPriceInput) : null,
-      fuelTotal: type === "fuel" ? parsedAmount : null,
-      confirmedFuelPricePerLitre: type === "fuel" ? confirmedFuelPricePerLitre : null,
+      fuelLitres: category === "fuel" ? Number(fuelLitresInput) : null,
+      fuelPricePerLitre: category === "fuel" ? Number(fuelPriceInput) : null,
+      fuelTotal: category === "fuel" ? parsedAmount : null,
+      confirmedFuelPricePerLitre: category === "fuel" ? confirmedFuelPricePerLitre : null,
     };
 
     try {
@@ -234,13 +244,13 @@ export function ExpenseUploadScreen() {
 
   return (
     <ScreenShell title="Upload Expense" subtitle="Save now locally, then sync receipt + metadata to cloud when available.">
-      <Card title="Expense Type">
+      <Card title="Category">
         <View style={styles.row}>
-          {EXPENSE_TYPES.map((entry) => (
+          {EXPENSE_CATEGORY_OPTIONS.map((entry) => (
             <PrimaryButton
-              key={entry}
-              label={type === entry ? `${toTitle(entry)} (Selected)` : toTitle(entry)}
-              onPress={() => setType(entry)}
+              key={entry.value}
+              label={category === entry.value ? `${entry.label} (Selected)` : entry.label}
+              onPress={() => setCategory(entry.value)}
             />
           ))}
         </View>
@@ -268,7 +278,7 @@ export function ExpenseUploadScreen() {
         <TextInput value={noteInput} onChangeText={setNoteInput} style={styles.input} />
       </Card>
 
-      {type === "fuel" ? (
+      {category === "fuel" ? (
         <Card title="Fuel Details">
           <Text>Litres</Text>
           <TextInput value={fuelLitresInput} onChangeText={setFuelLitresInput} keyboardType="decimal-pad" style={styles.input} />
@@ -304,6 +314,8 @@ export function ExpenseUploadScreen() {
 
       <Card title="Save">
         <PrimaryButton label="Save expense" onPress={onSave} />
+        <PrimaryButton label="View expenses" onPress={() => router.push("/expenses/history")} />
+        <Text>{`Category: ${getExpenseCategoryLabel(category)}`}</Text>
         {statusTone === "needs-retry" && lastExpenseId ? (
           <PrimaryButton label="Retry cloud sync" onPress={onRetrySync} />
         ) : null}
@@ -365,4 +377,6 @@ const styles = {
     gap: 8,
   },
 };
+
+
 

@@ -92,6 +92,7 @@ async function runSchemaMigrations(db: SQLite.SQLiteDatabase): Promise<void> {
   ]);
 
   await addMissingColumns(db, "expenses", [
+    { name: "expense_type", sqlType: "TEXT DEFAULT 'upload_receipt'" },
     { name: "payment_method", sqlType: "TEXT DEFAULT 'other'" },
     { name: "receipt_required_status", sqlType: "TEXT DEFAULT 'none'" },
     { name: "receipt_source_type", sqlType: "TEXT" },
@@ -110,6 +111,7 @@ async function runSchemaMigrations(db: SQLite.SQLiteDatabase): Promise<void> {
   ]);
 
   await addMissingColumns(db, "app_settings", [
+    { name: "vehicle_expense_method", sqlType: "TEXT DEFAULT 'simplified_mileage'" },
     { name: "operator_licence_due_date", sqlType: "TEXT" },
     { name: "training_hours_completed", sqlType: "REAL DEFAULT 0" },
     { name: "tax_correct_to_date", sqlType: "TEXT" },

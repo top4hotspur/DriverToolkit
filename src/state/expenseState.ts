@@ -12,7 +12,8 @@ export async function saveExpense(input: ExpenseInput): Promise<ExpenseSaveResul
   stored.unshift({
     id: expenseId,
     userId: "local-user",
-    type: input.type,
+    category: input.category,
+    expenseType: input.expenseType,
     paymentMethod: input.paymentMethod,
     amountGbp: input.amountGbp,
     expenseDate: input.expenseDate,
@@ -30,7 +31,7 @@ export async function saveExpense(input: ExpenseInput): Promise<ExpenseSaveResul
   });
 
   let fuelPriceUpdated = false;
-  if (input.type === "fuel" && typeof input.confirmedFuelPricePerLitre === "number" && input.confirmedFuelPricePerLitre > 0) {
+  if (input.category === "fuel" && typeof input.confirmedFuelPricePerLitre === "number" && input.confirmedFuelPricePerLitre > 0) {
     const current = await getVehicleCostSettings();
     await saveVehicleCostSettings({
       ...current,

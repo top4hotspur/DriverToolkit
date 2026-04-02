@@ -68,6 +68,7 @@ export function SettingsScreen() {
       trainingHoursCompleted: placeholderSettings.trainingHoursCompleted,
       taxCorrectToDate: placeholderSettings.taxCorrectToDate,
       maxStartShiftTravelRadiusMiles: placeholderSettings.maxStartShiftTravelRadiusMiles,
+      vehicleExpenseMethod: "simplified_mileage",
     } satisfies AppSettingsModel);
 
   const addPoint = async () => {
@@ -262,6 +263,11 @@ export function SettingsScreen() {
         <Text>{`Latest import: ${latestImportAt ? formatUkDate(latestImportAt) : "No imports yet"}`}</Text>
       </Card>
 
+      <Card title="Expenses">
+        <Text>Review saved expenses and sync state.</Text>
+        <PrimaryButton label="Open expenses history" onPress={() => router.push("/expenses/history")} />
+      </Card>
+
       <Card title="Save">
         <PrimaryButton label="Save controls" onPress={saveControls} />
         {saveMessage ? <Text>{saveMessage}</Text> : null}
@@ -289,3 +295,5 @@ const styles = {
     flexWrap: "wrap" as const,
   },
 };
+
+

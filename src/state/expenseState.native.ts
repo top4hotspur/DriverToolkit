@@ -47,18 +47,19 @@ export async function saveExpense(input: ExpenseInput): Promise<ExpenseSaveResul
   await db.runAsync(
     `
       INSERT INTO expenses (
-        id, user_id, category, payment_method, amount, occurred_on, notes,
+        id, user_id, category, expense_type, payment_method, amount, occurred_on, notes,
         receipt_required_status, receipt_source_type, local_receipt_uri,
         mime_type, original_file_name, file_size_bytes,
         fuel_litres, fuel_price_per_litre, fuel_total,
         local_sync_status, cloud_synced_at, sync_state, receipt_file_id,
         created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `,
     [
       expenseId,
       USER_ID,
-      input.type,
+      input.category,
+      input.expenseType,
       input.paymentMethod,
       input.amountGbp,
       input.expenseDate,
@@ -92,7 +93,7 @@ export async function saveExpense(input: ExpenseInput): Promise<ExpenseSaveResul
 
   let fuelPriceUpdated = false;
   const confirmedFuelPrice = input.confirmedFuelPricePerLitre ?? input.fuelPricePerLitre ?? null;
-  if (input.type === "fuel" && typeof confirmedFuelPrice === "number" && confirmedFuelPrice > 0) {
+  if (input.category === "fuel" && typeof confirmedFuelPrice === "number" && confirmedFuelPrice > 0) {
     const current = await getVehicleCostSettings();
     await saveVehicleCostSettings({
       ...current,
@@ -138,7 +139,8 @@ export async function listRecentExpenses(limit = 20): Promise<ExpenseRecord[]> {
       SELECT
         id,
         user_id as userId,
-        category as type,
+        category as category,
+        COALESCE(expense_type, 'upload_receipt') as expenseType,
         payment_method as paymentMethod,
         amount as amountGbp,
         occurred_on as expenseDate,
@@ -190,7 +192,8 @@ async function syncExpenseToCloud(expenseId: string): Promise<LocalSyncStatus> {
       SELECT
         id,
         user_id as userId,
-        category as type,
+        category as category,
+        COALESCE(expense_type, 'upload_receipt') as expenseType,
         payment_method as paymentMethod,
         amount as amountGbp,
         occurred_on as expenseDate,
@@ -290,7 +293,8 @@ async function syncExpenseToCloud(expenseId: string): Promise<LocalSyncStatus> {
     expense: {
       expenseId: expense.id,
       userId: expense.userId,
-      type: expense.type,
+      category: expense.category,
+      expenseType: expense.expenseType,
       paymentMethod: expense.paymentMethod,
       amountGbp: expense.amountGbp,
       expenseDate: expense.expenseDate,

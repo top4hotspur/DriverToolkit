@@ -35,7 +35,8 @@ export interface PrivacyImportFileMetadata {
 export interface ExpenseCloudRecord {
   expenseId: string;
   userId: string;
-  type: ExpenseRecord["type"];
+  category: ExpenseRecord["category"];
+  expenseType: ExpenseRecord["expenseType"];
   amountGbp: number;
   expenseDate: string;
   paymentMethod: ExpenseRecord["paymentMethod"];

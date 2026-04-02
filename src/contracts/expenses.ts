@@ -1,4 +1,23 @@
-export type ExpenseType = "fuel" | "parking" | "cleaning" | "food" | "toll" | "other";
+export type ExpenseCategory =
+  | "mileage_vehicle"
+  | "fuel"
+  | "parking"
+  | "tolls"
+  | "licence_badge_compliance"
+  | "radio_operator_fees"
+  | "repairs_servicing_tyres_mot"
+  | "insurance_vehicle_tax"
+  | "cleaning_valeting"
+  | "phone_data_internet"
+  | "software_subscriptions"
+  | "accounting_professional_fees"
+  | "office_stationery_postage"
+  | "protective_clothing_uniform"
+  | "other";
+
+export type ExpenseType = "upload_receipt" | "cash_manual";
+
+export type VehicleExpenseMethod = "simplified_mileage" | "actual_vehicle_costs";
 
 export type ExpensePaymentMethod = "cash" | "card" | "other";
 
@@ -13,7 +32,8 @@ export type UploadStatus = "queued" | "uploading" | "uploaded" | "failed";
 export type SyncStatus = "pending" | "syncing" | "synced" | "failed";
 
 export interface ExpenseInput {
-  type: ExpenseType;
+  category: ExpenseCategory;
+  expenseType: ExpenseType;
   paymentMethod: ExpensePaymentMethod;
   amountGbp: number;
   expenseDate: string;
@@ -33,7 +53,8 @@ export interface ExpenseInput {
 export interface ExpenseRecord {
   id: string;
   userId: string;
-  type: ExpenseType;
+  category: ExpenseCategory;
+  expenseType: ExpenseType;
   paymentMethod: ExpensePaymentMethod;
   amountGbp: number;
   expenseDate: string;
@@ -82,4 +103,27 @@ export interface ExpenseSaveResult {
   localSyncStatus: LocalSyncStatus;
   fuelPriceUpdated: boolean;
   warning?: string;
+}
+
+export const EXPENSE_CATEGORY_OPTIONS: Array<{ value: ExpenseCategory; label: string }> = [
+  { value: "mileage_vehicle", label: "Mileage / Vehicle" },
+  { value: "fuel", label: "Fuel" },
+  { value: "parking", label: "Parking" },
+  { value: "tolls", label: "Tolls" },
+  { value: "licence_badge_compliance", label: "Licence / Badge / Compliance" },
+  { value: "radio_operator_fees", label: "Radio / Operator Fees" },
+  { value: "repairs_servicing_tyres_mot", label: "Repairs / Servicing / Tyres / MOT" },
+  { value: "insurance_vehicle_tax", label: "Insurance / Vehicle Tax" },
+  { value: "cleaning_valeting", label: "Cleaning / Valeting" },
+  { value: "phone_data_internet", label: "Phone / Data / Internet" },
+  { value: "software_subscriptions", label: "Software / Subscriptions" },
+  { value: "accounting_professional_fees", label: "Accounting / Professional Fees" },
+  { value: "office_stationery_postage", label: "Office / Stationery / Postage" },
+  { value: "protective_clothing_uniform", label: "Protective Clothing / Uniform" },
+  { value: "other", label: "Other" },
+];
+
+export function getExpenseCategoryLabel(category: ExpenseCategory): string {
+  const match = EXPENSE_CATEGORY_OPTIONS.find((item) => item.value === category);
+  return match?.label ?? category;
 }

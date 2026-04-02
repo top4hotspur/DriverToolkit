@@ -1,15 +1,20 @@
-﻿import { useEffect, useState } from "react";
+﻿import { useRouter } from "expo-router";
+import { useEffect, useState } from "react";
 import { Text, TextInput, View } from "react-native";
-import { ExpenseType, LocalSyncStatus } from "../contracts/expenses";
+import {
+  ExpenseCategory,
+  EXPENSE_CATEGORY_OPTIONS,
+  LocalSyncStatus,
+  getExpenseCategoryLabel,
+} from "../contracts/expenses";
 import { initDatabase } from "../db/schema";
 import { getExpenseSyncStatus, retryExpenseSync, saveExpense } from "../state/expenseState";
 import { formatUkDate } from "../utils/format";
 import { Card, PrimaryButton, ScreenShell } from "./ui";
 
-const CASH_TYPES: ExpenseType[] = ["parking", "cleaning", "food", "toll", "other", "fuel"];
-
 export function CashExpenseScreen() {
-  const [type, setType] = useState<ExpenseType>("other");
+  const router = useRouter();
+  const [category, setCategory] = useState<ExpenseCategory>("other");
   const [amountInput, setAmountInput] = useState("");
   const [dateInput, setDateInput] = useState(new Date().toISOString().slice(0, 10));
   const [noteInput, setNoteInput] = useState("");
@@ -37,7 +42,8 @@ export function CashExpenseScreen() {
 
     try {
       const result = await saveExpense({
-        type,
+        category,
+        expenseType: "cash_manual",
         paymentMethod: "cash",
         amountGbp: amount,
         expenseDate: dateInput,
@@ -110,13 +116,13 @@ export function CashExpenseScreen() {
 
   return (
     <ScreenShell title="Add Cash Expense" subtitle="Record cash expense now with immediate local save and best-effort cloud sync.">
-      <Card title="Expense Type">
+      <Card title="Category">
         <View style={styles.row}>
-          {CASH_TYPES.map((entry) => (
+          {EXPENSE_CATEGORY_OPTIONS.map((entry) => (
             <PrimaryButton
-              key={entry}
-              label={type === entry ? `${toTitle(entry)} (Selected)` : toTitle(entry)}
-              onPress={() => setType(entry)}
+              key={entry.value}
+              label={category === entry.value ? `${entry.label} (Selected)` : entry.label}
+              onPress={() => setCategory(entry.value)}
             />
           ))}
         </View>
@@ -134,6 +140,8 @@ export function CashExpenseScreen() {
 
       <Card title="Save">
         <PrimaryButton label="Save cash expense" onPress={onSave} />
+        <PrimaryButton label="View expenses" onPress={() => router.push("/expenses/history")} />
+        <Text>{`Category: ${getExpenseCategoryLabel(category)}`}</Text>
         {statusTone === "needs-retry" && lastExpenseId ? (
           <PrimaryButton label="Retry cloud sync" onPress={onRetrySync} />
         ) : null}
@@ -166,10 +174,6 @@ function toneStyle(tone: LocalSyncStatus | "info") {
   return { color: "#415049", marginTop: 8 };
 }
 
-function toTitle(value: string): string {
-  return value.charAt(0).toUpperCase() + value.slice(1);
-}
-
 const styles = {
   input: {
     borderWidth: 1,
@@ -185,4 +189,6 @@ const styles = {
     gap: 8,
   },
 };
+
+
 

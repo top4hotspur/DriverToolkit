@@ -1,4 +1,6 @@
-﻿export interface AppSettingsModel {
+﻿import { VehicleExpenseMethod } from "../contracts/expenses";
+
+export interface AppSettingsModel {
   taxSavingsAmount: number;
   estimatedTaxLiability: number;
   psvDueDate: string | null;
@@ -7,4 +9,5 @@
   trainingHoursCompleted: number;
   taxCorrectToDate: string | null;
   maxStartShiftTravelRadiusMiles: number;
+  vehicleExpenseMethod: VehicleExpenseMethod;
 }
