@@ -153,6 +153,14 @@ function parseDateValue(value) {
   return null;
 }
 
+function normalizeTimestampKey(value) {
+  const parsed = parseDateValue(value);
+  if (!parsed) {
+    return null;
+  }
+  return `${parsed.toISOString().slice(0, 19)}Z`;
+}
+
 function resolveTimestampField(headers, preferredField) {
   const normalizedToRaw = new Map(
     headers.map((header) => [normalizeHeader(header), header])
@@ -195,6 +203,88 @@ function computeDateRange(rows, timestampField) {
   return {
     startAt: new Date(minMs).toISOString(),
     endAt: new Date(maxMs).toISOString(),
+  };
+}
+
+function computeFirstPassMatchingSummary(
+  tripRows,
+  paymentRows,
+  tripTimestampField,
+  paymentTimestampField
+) {
+  const tripsByTimestamp = new Map();
+  const paymentsByTimestamp = new Map();
+  let validTripTimestamps = 0;
+  let validPaymentTimestamps = 0;
+
+  for (const tripRow of tripRows) {
+    const key = normalizeTimestampKey(tripRow[tripTimestampField]);
+    if (!key) {
+      continue;
+    }
+    validTripTimestamps += 1;
+    const list = tripsByTimestamp.get(key) ?? [];
+    list.push(tripRow);
+    tripsByTimestamp.set(key, list);
+  }
+
+  for (const paymentRow of paymentRows) {
+    const key = normalizeTimestampKey(paymentRow[paymentTimestampField]);
+    if (!key) {
+      continue;
+    }
+    validPaymentTimestamps += 1;
+    const list = paymentsByTimestamp.get(key) ?? [];
+    list.push(paymentRow);
+    paymentsByTimestamp.set(key, list);
+  }
+
+  let matchedTrips = 0;
+  let unmatchedTrips = 0;
+  let ambiguousMatches = 0;
+  const usedPaymentGroupKeys = new Set();
+
+  for (const [timestampKey, tripGroup] of tripsByTimestamp.entries()) {
+    const paymentGroup = paymentsByTimestamp.get(timestampKey);
+    const tripCount = tripGroup.length;
+
+    if (!paymentGroup || paymentGroup.length === 0) {
+      unmatchedTrips += tripCount;
+      continue;
+    }
+
+    if (paymentGroup.length === 1) {
+      matchedTrips += 1;
+      usedPaymentGroupKeys.add(timestampKey);
+      if (tripCount > 1) {
+        ambiguousMatches += tripCount - 1;
+      }
+      continue;
+    }
+
+    ambiguousMatches += tripCount;
+  }
+
+  let unmatchedPayments = 0;
+  for (const [timestampKey] of paymentsByTimestamp.entries()) {
+    if (!usedPaymentGroupKeys.has(timestampKey)) {
+      unmatchedPayments += 1;
+    }
+  }
+
+  return {
+    matchedTrips,
+    unmatchedTrips,
+    unmatchedPayments,
+    ambiguousMatches,
+    diagnostics: {
+      tripsConsidered: tripRows.length,
+      paymentsConsidered: paymentRows.length,
+      validTripTimestamps,
+      validPaymentTimestamps,
+      uniqueTripTimestamps: tripsByTimestamp.size,
+      uniquePaymentTimestamps: paymentsByTimestamp.size,
+    },
   };
 }
 
@@ -492,6 +582,13 @@ app.post("/api/imports/:importId/confirm", (req, res) => {
       "event_time_utc"
     );
 
+    const matchingSummary = computeFirstPassMatchingSummary(
+      tripsSummary.dataRows,
+      paymentsSummary.dataRows,
+      tripsSummary.timestampFieldUsed,
+      paymentsSummary.timestampFieldUsed
+    );
+
     console.log(
       `[IMPORT][confirm] csv trips rowCount=${tripsSummary.rowCount} timestampField=${tripsSummary.timestampFieldUsed} dateRange=${JSON.stringify(tripsSummary.dateRange)}`
     );
@@ -500,6 +597,12 @@ app.post("/api/imports/:importId/confirm", (req, res) => {
     );
     console.log(
       `[IMPORT][confirm] csv analytics rowCount=${analyticsSummary.rowCount} timestampField=${analyticsSummary.timestampFieldUsed} dateRange=${JSON.stringify(analyticsSummary.dateRange)}`
+    );
+    console.log(
+      `[IMPORT][confirm] matching tripsConsidered=${matchingSummary.diagnostics.tripsConsidered} paymentsConsidered=${matchingSummary.diagnostics.paymentsConsidered} tripTimestampField=${tripsSummary.timestampFieldUsed} paymentTimestampField=${paymentsSummary.timestampFieldUsed}`
+    );
+    console.log(
+      `[IMPORT][confirm] matching matchedTrips=${matchingSummary.matchedTrips} unmatchedTrips=${matchingSummary.unmatchedTrips} unmatchedPayments=${matchingSummary.unmatchedPayments} ambiguousMatches=${matchingSummary.ambiguousMatches}`
     );
 
     record.summary = {
@@ -514,6 +617,10 @@ app.post("/api/imports/:importId/confirm", (req, res) => {
       tripsDateRange: tripsSummary.dateRange,
       paymentsDateRange: paymentsSummary.dateRange,
       analyticsDateRange: analyticsSummary.dateRange,
+      matchedTrips: matchingSummary.matchedTrips,
+      unmatchedTrips: matchingSummary.unmatchedTrips,
+      unmatchedPayments: matchingSummary.unmatchedPayments,
+      ambiguousMatches: matchingSummary.ambiguousMatches,
       parsedFileDetails: {
         trips: {
           selectedFileName: tripsEntryName,
