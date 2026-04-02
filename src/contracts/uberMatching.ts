@@ -42,29 +42,45 @@ export interface UberMatchingValidationResult {
     };
     trips: {
       detectedHeaders: string[];
+      normalizedHeaderMap: Record<string, string>;
       sampleRows: Array<Record<string, string>>;
+      timestampCandidatesTried: string[];
       timestampFieldUsed: string | null;
+      chosenRawTimestampField: string | null;
+      sampleRawTimestampValues: string[];
       validTimestampCount: number;
       validAfterFilteringCount: number;
       sampleParsedRequestTimestamps: string[];
+      parseRejectionReasonCounts: Record<string, number>;
     };
     payments: {
       detectedHeaders: string[];
+      normalizedHeaderMap: Record<string, string>;
       sampleRows: Array<Record<string, string>>;
+      timestampCandidatesTried: string[];
       timestampFieldUsed: string | null;
+      chosenRawTimestampField: string | null;
       tripUuidFieldUsed: string | null;
       amountFieldUsed: string | null;
+      sampleRawTimestampValues: string[];
       validTimestampCount: number;
       validTripUuidCount: number;
       validAfterFilteringCount: number;
       groupsCreatedCount: number;
       sampleParsedPaymentTimestamps: string[];
+      parseRejectionReasonCounts: Record<string, number>;
     };
     analytics: {
       detectedHeaders: string[];
+      normalizedHeaderMap: Record<string, string>;
       sampleRows: Array<Record<string, string>>;
+      timestampCandidatesTried: string[];
       timestampFieldUsed: string | null;
+      chosenRawTimestampField: string | null;
+      sampleRawTimestampValues: string[];
       validTimestampCount: number;
+      sampleParsedTimestamps: string[];
+      parseRejectionReasonCounts: Record<string, number>;
     } | null;
   };
 }

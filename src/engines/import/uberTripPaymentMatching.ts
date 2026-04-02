@@ -17,41 +17,57 @@ import {
   UberUnmatchedTripRow,
 } from "../../contracts/uberMatching";
 import { toIsoDateTime, toNumber } from "../../utils/csv";
+import { buildNormalizedHeaderMap, normalizeCsvHeader } from "../../utils/csvHeaders";
 import { ImportFileDescriptor } from "./adapters";
 
 type ParsedCsv = {
   fileName: string;
   rows: Array<Record<string, string>>;
+  rawRows: Array<Record<string, string>>;
   fields: string[];
+  normalizedHeaderMap: Record<string, string>;
   sampleRows: Array<Record<string, string>>;
 };
 
 type TripBuildResult = {
   candidates: UberTripCandidate[];
+  timestampCandidatesTried: string[];
   timestampFieldUsed: string | null;
+  chosenRawTimestampField: string | null;
+  sampleRawTimestampValues: string[];
   validTimestampCount: number;
   validAfterFilteringCount: number;
   sampleParsedRequestTimestamps: string[];
+  parseRejectionReasonCounts: Record<string, number>;
 };
 
 type PaymentBuildResult = {
   groups: UberPaymentGroup[];
   unknownRows: UberUnknownClassificationRow[];
+  timestampCandidatesTried: string[];
   timestampFieldUsed: string | null;
+  chosenRawTimestampField: string | null;
   tripUuidFieldUsed: string | null;
   amountFieldUsed: string | null;
+  sampleRawTimestampValues: string[];
   validTimestampCount: number;
   validTripUuidCount: number;
   validAfterFilteringCount: number;
   sampleParsedPaymentTimestamps: string[];
   paymentTimestampIsoValues: Array<string | null>;
+  parseRejectionReasonCounts: Record<string, number>;
 };
 
 type DateRangeWithDiagnostics = {
   startAt: string | null;
   endAt: string | null;
+  timestampCandidatesTried: string[];
   fieldUsed: string | null;
+  chosenRawField: string | null;
+  sampleRawTimestampValues: string[];
+  sampleParsedTimestamps: string[];
   validCount: number;
+  parseRejectionReasonCounts: Record<string, number>;
 };
 
 type PaymentScoredCandidate = {
@@ -64,8 +80,14 @@ type PaymentScoredCandidate = {
 const DEFAULT_SEARCH_WINDOWS = [10, 20, 30];
 
 const REQUIRED_TRIP_FIELD_GROUPS: Array<{ label: string; candidates: string[] }> = [
-  { label: "begin trip timestamp", candidates: ["begin_trip_time", "begintrip_timestamp", "begintriptime", "start_time"] },
-  { label: "dropoff timestamp", candidates: ["dropoff_time", "dropoff_timestamp", "dropofftime", "end_time"] },
+  {
+    label: "begin trip timestamp",
+    candidates: ["begintrip_timestamp_local", "begin_trip_time", "begintrip_timestamp", "begintriptime", "start_time"],
+  },
+  {
+    label: "dropoff timestamp",
+    candidates: ["dropoff_timestamp_local", "dropoff_time", "dropoff_timestamp", "dropofftime", "end_time"],
+  },
 ];
 const REQUIRED_PAYMENT_FIELD_GROUPS: Array<{ label: string; candidates: string[] }> = [
   { label: "trip uuid", candidates: ["trip_uuid", "tripuuid", "trip_id", "tripid", "trip_uuids"] },
@@ -251,11 +273,14 @@ function parseCsv(file: UberMatchCsvFileInput): ParsedCsv {
   const parsed = Papa.parse<Record<string, string>>(file.csvText, {
     header: true,
     skipEmptyLines: "greedy",
-    transformHeader: normalizeUberHeader,
   });
 
-  const fields = (parsed.meta.fields ?? []).filter(Boolean);
-  const sampleRows = parsed.data.slice(0, 3).map((row) => {
+  const rawFields = (parsed.meta.fields ?? []).filter(Boolean);
+  const normalizedHeaderMap = buildNormalizedHeaderMap(rawFields);
+  const fields = Object.keys(normalizedHeaderMap);
+  const rawRows = parsed.data;
+  const rows = rawRows.map((rawRow) => normalizeRowWithHeaderMap(rawRow, normalizedHeaderMap));
+  const sampleRows = rows.slice(0, 3).map((row) => {
     const sample: Record<string, string> = {};
     for (const key of fields.slice(0, 10)) {
       sample[key] = String(row[key] ?? "");
@@ -264,8 +289,10 @@ function parseCsv(file: UberMatchCsvFileInput): ParsedCsv {
   });
   return {
     fileName: file.fileName,
-    rows: parsed.data,
+    rows,
+    rawRows,
     fields,
+    normalizedHeaderMap,
     sampleRows,
   };
 }
@@ -284,8 +311,9 @@ function validateMatchingDataset(args: {
   const paymentsRange = dateRangeFromPayments(
     args.paymentsBuild.paymentTimestampIsoValues.filter((value): value is string => Boolean(value)),
   );
+  const analyticsTimestampCandidates = ["event_time_utc", "event_timestamp", "timestamp", "recorded_at", "time", "event_time"];
   const analyticsRange = args.analytics
-    ? dateRangeFromRows(args.analytics.rows, ["event_timestamp", "timestamp", "recorded_at", "time", "event_time"])
+    ? dateRangeFromRows(args.analytics, analyticsTimestampCandidates)
     : null;
 
   const tripsCurrencies = collectDistinctValues(args.trips.rows, ["currency_code", "currency", "currencycode"]);
@@ -399,30 +427,46 @@ function validateMatchingDataset(args: {
       },
       trips: {
         detectedHeaders: args.trips.fields,
+        normalizedHeaderMap: args.trips.normalizedHeaderMap,
         sampleRows: args.trips.sampleRows,
+        timestampCandidatesTried: args.tripsBuild.timestampCandidatesTried,
         timestampFieldUsed: args.tripsBuild.timestampFieldUsed,
+        chosenRawTimestampField: args.tripsBuild.chosenRawTimestampField,
+        sampleRawTimestampValues: args.tripsBuild.sampleRawTimestampValues,
         validTimestampCount: args.tripsBuild.validTimestampCount,
         validAfterFilteringCount: args.tripsBuild.validAfterFilteringCount,
         sampleParsedRequestTimestamps: args.tripsBuild.sampleParsedRequestTimestamps,
+        parseRejectionReasonCounts: args.tripsBuild.parseRejectionReasonCounts,
       },
       payments: {
         detectedHeaders: args.payments.fields,
+        normalizedHeaderMap: args.payments.normalizedHeaderMap,
         sampleRows: args.payments.sampleRows,
+        timestampCandidatesTried: args.paymentsBuild.timestampCandidatesTried,
         timestampFieldUsed: args.paymentsBuild.timestampFieldUsed,
+        chosenRawTimestampField: args.paymentsBuild.chosenRawTimestampField,
         tripUuidFieldUsed: args.paymentsBuild.tripUuidFieldUsed,
         amountFieldUsed: args.paymentsBuild.amountFieldUsed,
+        sampleRawTimestampValues: args.paymentsBuild.sampleRawTimestampValues,
         validTimestampCount: args.paymentsBuild.validTimestampCount,
         validTripUuidCount: args.paymentsBuild.validTripUuidCount,
         validAfterFilteringCount: args.paymentsBuild.validAfterFilteringCount,
         groupsCreatedCount: args.paymentsBuild.groups.length,
         sampleParsedPaymentTimestamps: args.paymentsBuild.sampleParsedPaymentTimestamps,
+        parseRejectionReasonCounts: args.paymentsBuild.parseRejectionReasonCounts,
       },
       analytics: args.analytics
         ? {
             detectedHeaders: args.analytics.fields,
+            normalizedHeaderMap: args.analytics.normalizedHeaderMap,
             sampleRows: args.analytics.sampleRows,
+            timestampCandidatesTried: analyticsRange?.timestampCandidatesTried ?? analyticsTimestampCandidates,
             timestampFieldUsed: analyticsRange?.fieldUsed ?? null,
+            chosenRawTimestampField: analyticsRange?.chosenRawField ?? null,
+            sampleRawTimestampValues: analyticsRange?.sampleRawTimestampValues ?? [],
             validTimestampCount: analyticsRange?.validCount ?? 0,
+            sampleParsedTimestamps: analyticsRange?.sampleParsedTimestamps ?? [],
+            parseRejectionReasonCounts: analyticsRange?.parseRejectionReasonCounts ?? {},
           }
         : null,
     },
@@ -431,7 +475,19 @@ function validateMatchingDataset(args: {
 
 function buildPaymentGroups(csv: ParsedCsv): PaymentBuildResult {
   const tripUuidKey = pickField(csv.fields, ["trip_uuid", "tripuuid", "trip_id", "tripid", "trip_uuids"]);
+  const paymentTimestampCandidates = [
+    "local_timestamp",
+    "timestamp",
+    "payment_timestamp",
+    "created_at",
+    "transaction_time",
+    "date",
+    "transaction_timestamp",
+    "job_timestamp",
+    "request_timestamp",
+  ];
   const timestampKey = pickField(csv.fields, [
+    "local_timestamp",
     "timestamp",
     "payment_timestamp",
     "created_at",
@@ -445,19 +501,24 @@ function buildPaymentGroups(csv: ParsedCsv): PaymentBuildResult {
   const classificationKey = pickField(csv.fields, ["classification", "type", "description", "line_item", "payment_type"]);
   const categoryKey = pickField(csv.fields, ["category", "group", "bucket"]);
   const currencyKey = pickField(csv.fields, ["currency_code", "currency", "currencycode"]);
+  const chosenRawTimestampField = timestampKey ? csv.normalizedHeaderMap[timestampKey] ?? timestampKey : null;
 
   if (!tripUuidKey || !amountKey) {
     return {
       groups: [],
       unknownRows: [],
+      timestampCandidatesTried: paymentTimestampCandidates.map((candidate) => normalizeCsvHeader(candidate)),
       timestampFieldUsed: timestampKey,
+      chosenRawTimestampField,
       tripUuidFieldUsed: tripUuidKey,
       amountFieldUsed: amountKey,
+      sampleRawTimestampValues: [],
       validTimestampCount: 0,
       validTripUuidCount: 0,
       validAfterFilteringCount: 0,
       sampleParsedPaymentTimestamps: [],
       paymentTimestampIsoValues: [],
+      parseRejectionReasonCounts: {},
     };
   }
 
@@ -465,14 +526,24 @@ function buildPaymentGroups(csv: ParsedCsv): PaymentBuildResult {
   let validTripUuidCount = 0;
   let validTimestampCount = 0;
   let validAfterFilteringCount = 0;
+  const sampleRawTimestampValues: string[] = [];
+  const parseRejectionReasonCounts: Record<string, number> = {};
   const sampleParsedPaymentTimestamps: string[] = [];
   const paymentTimestampIsoValues: Array<string | null> = [];
-  for (const row of csv.rows) {
+  for (let index = 0; index < csv.rows.length; index += 1) {
+    const row = csv.rows[index];
+    const rawRow = csv.rawRows[index] ?? {};
     const tripUuid = safeTrim(row[tripUuidKey]);
     if (tripUuid) {
       validTripUuidCount += 1;
     }
-    const parsedTimestamp = timestampKey ? parseUberDateTime(row[timestampKey]) : null;
+    const rawTimestamp = timestampKey ? readFieldValue(csv, rawRow, row, timestampKey) : null;
+    if (rawTimestamp && sampleRawTimestampValues.length < 3) {
+      sampleRawTimestampValues.push(rawTimestamp);
+    }
+    const parsedTimestampResult = parseUberDateTimeWithReason(rawTimestamp);
+    accumulateReason(parseRejectionReasonCounts, parsedTimestampResult.reason);
+    const parsedTimestamp = parsedTimestampResult.iso;
     paymentTimestampIsoValues.push(parsedTimestamp);
     if (parsedTimestamp) {
       validTimestampCount += 1;
@@ -582,21 +653,66 @@ function buildPaymentGroups(csv: ParsedCsv): PaymentBuildResult {
   return {
     groups,
     unknownRows,
+    timestampCandidatesTried: paymentTimestampCandidates.map((candidate) => normalizeCsvHeader(candidate)),
     timestampFieldUsed: timestampKey,
+    chosenRawTimestampField,
     tripUuidFieldUsed: tripUuidKey,
     amountFieldUsed: amountKey,
+    sampleRawTimestampValues,
     validTimestampCount,
     validTripUuidCount,
     validAfterFilteringCount,
     sampleParsedPaymentTimestamps,
     paymentTimestampIsoValues,
+    parseRejectionReasonCounts,
   };
 }
 
 function buildTripCandidates(csv: ParsedCsv): TripBuildResult {
-  const requestKey = pickField(csv.fields, ["request_time", "request_timestamp", "requested_at", "request", "request_at"]);
-  const beginKey = pickField(csv.fields, ["begin_trip_time", "begintrip_timestamp", "begintriptime", "start_time", "begin"]);
-  const dropoffKey = pickField(csv.fields, ["dropoff_time", "dropoff_timestamp", "dropofftime", "end_time", "dropoff"]);
+  const tripTimestampCandidates = [
+    "request_timestamp_local",
+    "request_timestamp",
+    "request_time",
+    "requested_at",
+    "request",
+    "request_at",
+    "begintrip_timestamp_local",
+    "begin_trip_time",
+    "begintrip_timestamp",
+    "begintriptime",
+    "start_time",
+    "begin",
+    "dropoff_timestamp_local",
+    "dropoff_time",
+    "dropoff_timestamp",
+    "dropofftime",
+    "end_time",
+    "dropoff",
+  ];
+  const requestKey = pickField(csv.fields, [
+    "request_timestamp_local",
+    "request_time",
+    "request_timestamp",
+    "requested_at",
+    "request",
+    "request_at",
+  ]);
+  const beginKey = pickField(csv.fields, [
+    "begintrip_timestamp_local",
+    "begin_trip_time",
+    "begintrip_timestamp",
+    "begintriptime",
+    "start_time",
+    "begin",
+  ]);
+  const dropoffKey = pickField(csv.fields, [
+    "dropoff_timestamp_local",
+    "dropoff_time",
+    "dropoff_timestamp",
+    "dropofftime",
+    "end_time",
+    "dropoff",
+  ]);
   const distanceKey = pickField(csv.fields, ["trip_distance_miles", "distance_miles", "distance", "miles"]);
   const durationKey = pickField(csv.fields, ["trip_duration_seconds", "duration_seconds", "duration", "seconds"]);
   const baseFareKey = pickField(csv.fields, ["base_fare_local", "base_fare", "basefare"]);
@@ -609,11 +725,35 @@ function buildTripCandidates(csv: ParsedCsv): TripBuildResult {
 
   let validTimestampCount = 0;
   const sampleParsedRequestTimestamps: string[] = [];
+  const sampleRawTimestampValues: string[] = [];
+  const parseRejectionReasonCounts: Record<string, number> = {};
+  const chosenTimestampField = requestKey ?? beginKey ?? dropoffKey ?? null;
+  const chosenRawTimestampField = chosenTimestampField ? csv.normalizedHeaderMap[chosenTimestampField] ?? chosenTimestampField : null;
 
   const candidates = csv.rows.map((row, index) => {
-    const requestTimestamp = requestKey ? parseUberDateTime(row[requestKey]) : null;
-    const beginTripTimestamp = beginKey ? parseUberDateTime(row[beginKey]) : null;
-    const dropoffTimestamp = dropoffKey ? parseUberDateTime(row[dropoffKey]) : null;
+    const rawRow = csv.rawRows[index] ?? {};
+    const requestRaw = requestKey ? readFieldValue(csv, rawRow, row, requestKey) : null;
+    const beginRaw = beginKey ? readFieldValue(csv, rawRow, row, beginKey) : null;
+    const dropoffRaw = dropoffKey ? readFieldValue(csv, rawRow, row, dropoffKey) : null;
+
+    if (chosenTimestampField && sampleRawTimestampValues.length < 3) {
+      const sampleRaw = readFieldValue(csv, rawRow, row, chosenTimestampField);
+      if (sampleRaw) {
+        sampleRawTimestampValues.push(sampleRaw);
+      }
+    }
+
+    const requestParsed = parseUberDateTimeWithReason(requestRaw);
+    const beginParsed = parseUberDateTimeWithReason(beginRaw);
+    const dropoffParsed = parseUberDateTimeWithReason(dropoffRaw);
+    const requestTimestamp = requestParsed.iso;
+    const beginTripTimestamp = beginParsed.iso;
+    const dropoffTimestamp = dropoffParsed.iso;
+
+    accumulateReason(parseRejectionReasonCounts, requestParsed.reason);
+    accumulateReason(parseRejectionReasonCounts, beginParsed.reason);
+    accumulateReason(parseRejectionReasonCounts, dropoffParsed.reason);
+
     if (requestTimestamp || beginTripTimestamp || dropoffTimestamp) {
       validTimestampCount += 1;
     }
@@ -639,10 +779,14 @@ function buildTripCandidates(csv: ParsedCsv): TripBuildResult {
 
   return {
     candidates,
-    timestampFieldUsed: requestKey ?? beginKey ?? dropoffKey ?? null,
+    timestampCandidatesTried: tripTimestampCandidates.map((candidate) => normalizeCsvHeader(candidate)),
+    timestampFieldUsed: chosenTimestampField,
+    chosenRawTimestampField,
+    sampleRawTimestampValues,
     validTimestampCount,
     validAfterFilteringCount: candidates.length,
     sampleParsedRequestTimestamps,
+    parseRejectionReasonCounts,
   };
 }
 
@@ -818,7 +962,7 @@ function buildAnalyticsInference(args: {
     return [];
   }
 
-  const timestampKey = pickField(args.analytics.fields, ["event_timestamp", "timestamp", "recorded_at", "time"]);
+  const timestampKey = pickField(args.analytics.fields, ["event_time_utc", "event_timestamp", "timestamp", "recorded_at", "time"]);
   const latKey = pickField(args.analytics.fields, ["latitude", "lat", "start_lat", "end_lat"]);
   const lngKey = pickField(args.analytics.fields, ["longitude", "lng", "lon", "start_lng", "end_lng"]);
 
@@ -930,18 +1074,47 @@ function dateRangeFromPayments(values: Array<string | null>): { startAt: string 
   return dateRangeFromIso(values);
 }
 
-function dateRangeFromRows(rows: Array<Record<string, string>>, candidates: string[]): DateRangeWithDiagnostics {
-  const keys = Object.keys(rows[0] ?? {});
-  const key = pickField(keys, candidates);
+function dateRangeFromRows(csv: ParsedCsv, candidates: string[]): DateRangeWithDiagnostics {
+  const key = pickField(csv.fields, candidates);
   if (!key) {
-    return { startAt: null, endAt: null, fieldUsed: null, validCount: 0 };
+    return {
+      startAt: null,
+      endAt: null,
+      timestampCandidatesTried: candidates.map((candidate) => normalizeCsvHeader(candidate)),
+      fieldUsed: null,
+      chosenRawField: null,
+      sampleRawTimestampValues: [],
+      sampleParsedTimestamps: [],
+      validCount: 0,
+      parseRejectionReasonCounts: {},
+    };
   }
-  const values = rows.map((row) => parseUberDateTime(row[key]));
+  const chosenRawField = csv.normalizedHeaderMap[key] ?? key;
+  const sampleRawTimestampValues: string[] = [];
+  const sampleParsedTimestamps: string[] = [];
+  const parseRejectionReasonCounts: Record<string, number> = {};
+  const values = csv.rows.map((row, index) => {
+    const rawValue = readFieldValue(csv, csv.rawRows[index] ?? {}, row, key);
+    if (rawValue && sampleRawTimestampValues.length < 3) {
+      sampleRawTimestampValues.push(rawValue);
+    }
+    const parsed = parseUberDateTimeWithReason(rawValue);
+    if (parsed.iso && sampleParsedTimestamps.length < 3) {
+      sampleParsedTimestamps.push(parsed.iso);
+    }
+    accumulateReason(parseRejectionReasonCounts, parsed.reason);
+    return parsed.iso;
+  });
   const range = dateRangeFromIso(values);
   return {
     ...range,
+    timestampCandidatesTried: candidates.map((candidate) => normalizeCsvHeader(candidate)),
     fieldUsed: key,
+    chosenRawField,
+    sampleRawTimestampValues,
+    sampleParsedTimestamps,
     validCount: values.filter((value): value is string => Boolean(value)).length,
+    parseRejectionReasonCounts,
   };
 }
 
@@ -1030,11 +1203,32 @@ function findCsv(csvNames: string[], candidates: string[]): string | null {
 }
 
 function normalizeUberHeader(value: string): string {
-  return value
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "_")
-    .replace(/^_+|_+$/g, "")
-    .replace(/_+/g, "_");
+  return normalizeCsvHeader(value);
+}
+
+function normalizeRowWithHeaderMap(
+  rawRow: Record<string, string>,
+  normalizedHeaderMap: Record<string, string>,
+): Record<string, string> {
+  const normalizedRow: Record<string, string> = {};
+  for (const [normalizedHeader, rawHeader] of Object.entries(normalizedHeaderMap)) {
+    normalizedRow[normalizedHeader] = String(rawRow[rawHeader] ?? "");
+  }
+  return normalizedRow;
+}
+
+function readFieldValue(
+  csv: ParsedCsv,
+  rawRow: Record<string, string>,
+  normalizedRow: Record<string, string>,
+  normalizedField: string,
+): string | null {
+  const rawField = csv.normalizedHeaderMap[normalizedField];
+  const rawValue = rawField ? safeTrim(rawRow[rawField]) : null;
+  if (rawValue) {
+    return rawValue;
+  }
+  return safeTrim(normalizedRow[normalizedField]);
 }
 
 function safeTrim(value: unknown): string | null {
@@ -1046,34 +1240,73 @@ function safeTrim(value: unknown): string | null {
 }
 
 function parseUberDateTime(value: unknown): string | null {
+  return parseUberDateTimeWithReason(value).iso;
+}
+
+function parseUberDateTimeWithReason(value: unknown): {
+  iso: string | null;
+  reason: "ok" | "empty" | "invalid-format";
+} {
   const raw = safeTrim(value);
   if (!raw) {
-    return null;
+    return { iso: null, reason: "empty" };
   }
 
   const stripped = raw.replace(/^['"]|['"]$/g, "").trim();
   if (!stripped) {
-    return null;
+    return { iso: null, reason: "empty" };
   }
 
   const direct = toIsoDateTime(stripped);
   if (direct) {
-    return direct;
+    return { iso: direct, reason: "ok" };
   }
 
   const swapped = stripped.replace(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})(.*)$/, "$3-$2-$1$4");
   const swappedIso = toIsoDateTime(swapped);
   if (swappedIso) {
-    return swappedIso;
+    return { iso: swappedIso, reason: "ok" };
   }
 
   const noComma = stripped.replace(",", " ");
   const noCommaIso = toIsoDateTime(noComma);
   if (noCommaIso) {
-    return noCommaIso;
+    return { iso: noCommaIso, reason: "ok" };
   }
 
-  return null;
+  const dmyHms = stripped.match(
+    /^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?(?:\s*(Z|UTC|[+-]\d{2}:?\d{2}))?$/i,
+  );
+  if (dmyHms) {
+    const day = Number(dmyHms[1]);
+    const month = Number(dmyHms[2]);
+    const year = Number(dmyHms[3].length === 2 ? `20${dmyHms[3]}` : dmyHms[3]);
+    const hour = Number(dmyHms[4] ?? "0");
+    const minute = Number(dmyHms[5] ?? "0");
+    const second = Number(dmyHms[6] ?? "0");
+    const tz = dmyHms[7] ? dmyHms[7].replace("UTC", "Z") : "";
+    const isoLike = `${year.toString().padStart(4, "0")}-${month.toString().padStart(2, "0")}-${day
+      .toString()
+      .padStart(2, "0")}T${hour.toString().padStart(2, "0")}:${minute
+      .toString()
+      .padStart(2, "0")}:${second.toString().padStart(2, "0")}${tz}`;
+    const parsed = toIsoDateTime(isoLike);
+    if (parsed) {
+      return { iso: parsed, reason: "ok" };
+    }
+  }
+
+  return { iso: null, reason: "invalid-format" };
+}
+
+function accumulateReason(
+  counts: Record<string, number>,
+  reason: "ok" | "empty" | "invalid-format",
+): void {
+  if (reason === "ok") {
+    return;
+  }
+  counts[reason] = (counts[reason] ?? 0) + 1;
 }
 
 function normalizeDistanceMiles(value: unknown): number | null {
