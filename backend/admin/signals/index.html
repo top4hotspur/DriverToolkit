@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Driver Toolkit Signal Admin</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; background: #0f1412; color: #e8f2ec; }
+    h1,h2 { margin: 0 0 10px; }
+    section { border: 1px solid #2b3832; border-radius: 10px; padding: 12px; margin-bottom: 12px; background: #171f1b; }
+    pre { white-space: pre-wrap; word-break: break-word; font-size: 12px; color: #b8c9c1; }
+    .row { display: flex; gap: 12px; flex-wrap: wrap; }
+    .col { flex: 1 1 340px; }
+  </style>
+</head>
+<body>
+  <h1>Signal Platform Admin (Foundation)</h1>
+  <p>Internal panel scaffold for providers, rollout rules, thresholds, tracked places, and feature flags.</p>
+  <div class="row">
+    <section class="col"><h2>Providers</h2><pre id="providers">Loading...</pre></section>
+    <section class="col"><h2>Rollout Rules</h2><pre id="rollout">Loading...</pre></section>
+  </div>
+  <div class="row">
+    <section class="col"><h2>Tracked Places/Hubs</h2><pre id="places">Loading...</pre></section>
+    <section class="col"><h2>Feature Flags</h2><pre id="flags">Loading...</pre></section>
+  </div>
+  <section><h2>Thresholds / Provider Controls</h2><pre id="thresholds">Loading...</pre></section>
+  <script>
+    async function load() {
+      const [providers, rollout, places, flags, config] = await Promise.all([
+        fetch("/api/admin/signals/providers").then(r => r.json()),
+        fetch("/api/admin/signals/rollout-rules").then(r => r.json()),
+        fetch("/api/admin/signals/tracked-places").then(r => r.json()),
+        fetch("/api/admin/signals/feature-flags").then(r => r.json()),
+        fetch("/api/admin/signals/config").then(r => r.json())
+      ]);
+      document.getElementById("providers").textContent = JSON.stringify(providers, null, 2);
+      document.getElementById("rollout").textContent = JSON.stringify(rollout, null, 2);
+      document.getElementById("places").textContent = JSON.stringify(places, null, 2);
+      document.getElementById("flags").textContent = JSON.stringify(flags, null, 2);
+      document.getElementById("thresholds").textContent = JSON.stringify(config, null, 2);
+    }
+    load().catch((error) => {
+      document.body.insertAdjacentHTML("beforeend", "<p>Failed to load admin data.</p>");
+      console.error(error);
+    });
+  </script>
+</body>
+</html>

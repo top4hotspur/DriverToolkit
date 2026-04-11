@@ -1,0 +1,19 @@
+# Dependencies
+node_modules/
+
+# Runtime outputs / local artifacts
+uploads/
+*.log
+*.out.log
+*.err.log
+tmp-*.log
+server-runtime*.log
+
+# Local env (keep example env files)
+.env
+.env.local
+.env.*.local
+!.env.staging.example
+
+# Optional heavy local artifact
+eng.traineddata

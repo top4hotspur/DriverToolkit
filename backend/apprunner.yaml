@@ -1,0 +1,17 @@
+version: 1.0
+runtime: nodejs18
+build:
+  commands:
+    build:
+      - npm ci --omit=dev
+run:
+  command: npm start
+  network:
+    port: 3000
+  env:
+    - name: NODE_ENV
+      value: staging
+    - name: HOST
+      value: 0.0.0.0
+    - name: PORT
+      value: "3000"
